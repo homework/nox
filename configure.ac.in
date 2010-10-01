@@ -75,6 +75,7 @@ ACI_PACKAGE([netapps],[misc network apps],
 ACI_PACKAGE([webapps],[misc ui apps],
                [webserver webservice webserviceclient
                	miscws
+                homework
                	#add webapps component here
 		],
                [TURN_ON_WEBAPPS])

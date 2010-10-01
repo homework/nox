@@ -1,0 +1,11 @@
+{
+    "components": [
+        {
+            "name": "homework",
+            "dependencies": [
+                "webservice"
+            ],
+            "python": "nox.webapps.homework.homework"
+        }
+    ]
+}
