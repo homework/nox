@@ -25,15 +25,28 @@ from nox.lib.packet import ethernet, ipv4
 
 Homework = None
 
+EMPTY_JSON = "{}"
 TICKER = 1
-IDLE_TIMEOUT = 10
-CONTROLLER_MAC_ADDR = util.convert_to_eaddr("d4:9a:20:d2:52:8e")
-CONTROLLER_IP_ADDR = util.convert_to_ipaddr("128.243.35.223")
-NOX_MAC_ADDRS = ( util.convert_to_eaddr(e) for e in
-                  ("00:23:20:85:69:d0", ## dp0
-                   "00:0c:f1:e2:e3:20", ## eth0
-                   ))
 
+class Actions:
+    really_flood = [
+        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]],
+        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_IN_PORT]],
+        ]
+    
+    flood_and_process = [
+        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]],
+        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_NORMAL]],
+        ]
+    
+    really_flood_and_process = [
+        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]],
+        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_IN_PORT]],
+        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_NORMAL]],
+        ]
+    
+## utility functions
+    
 def invert_flow(flow):
     s, d = flow['dl_src'], flow['dl_dst']
     flow['dl_src'], flow['dl_dst'] = d, s
@@ -60,101 +73,16 @@ def is_valid_eth(eth):
     try: return reduce(lambda acc,byte: (0 <= byte <= 256) and acc,
                        map(lambda b: int(b,16), bytes), True)
     except ValueError: return False
-               
+
+## ticker
+    
 def ticker():
     now = time.time()
     print "TICK", now
     Homework.post_callback(TICKER, ticker)
     return True
 
-def match_self(dpid, inport, reason, flen, bufid, packet):
-    print "=", inport, dpid, packet
-
-    return core.CONTINUE
-    
-def match_arp(dpid, inport, reason, flen, bufid, packet):
-    print "+", inport, dpid, packet
-    flow = core.extract_flow(packet)
-    
-    if flow['dl_type'] in (0x8100,): ## XXX why?!  this should only match on ARPs
-        return core.CONTINUE
-    
-    actions = [[openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]],
-               [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_IN_PORT]],
-               ]
-    Homework.install_datapath_flow(
-        dpid, flow, 0,0, actions,
-        bufid, openflow.OFP_DEFAULT_PRIORITY, inport, packet.arr)    
-    return core.CONTINUE
-
-def match_mac(dpid, inport, reason, flen, bufid, packet):
-    print "*", packet
-    flow = core.extract_flow(packet)
-    actions = [[openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]],
-               [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_IN_PORT]],
-               ]
-    Homework.install_datapath_flow(
-        dpid, flow, 0,0, actions,
-        bufid, openflow.OFP_DEFAULT_PRIORITY, inport, packet.arr)
-
-    return core.CONTINUE
-
-def permit(eaddr, ipaddr=None):
-    print "PERMIT", eaddr, ipaddr
-    if not (eaddr or ipaddr): return 
-    
-    global Homework
-
-    eaddr = util.convert_to_eaddr(eaddr)
-    if ipaddr: ipaddr = util.convert_to_ipaddr(ipaddr)
-
-    print "\t", eaddr, ipaddr
-                                        
-    ## permit ARP
-    prio = openflow.OFP_DEFAULT_PRIORITY
-    rules = { core.DL_TYPE: ethernet.ethernet.ARP_TYPE, }
-    rules[core.DL_SRC] = eaddr
-    Homework.register_for_packet_match(match_mac, prio, rules)
-
-    del rules[core.DL_SRC]
-    rules[core.DL_DST] = eaddr
-    Homework.register_for_packet_match(match_mac, prio, rules)
-
-    ## permit RARP
-    rules = { core.DL_TYPE: ethernet.ethernet.RARP_TYPE, }
-    rules[core.DL_SRC] = eaddr
-    Homework.register_for_packet_match(match_mac, prio, rules)
-
-    del rules[core.DL_SRC]
-    rules[core.DL_DST] = eaddr
-    Homework.register_for_packet_match(match_mac, prio, rules)
-
-    ## permit IP, also specifying IP addr if given
-    rules = { core.DL_TYPE: ethernet.ethernet.IP_TYPE, }
-    rules[core.DL_SRC] = eaddr
-    if ipaddr:
-        rules[core.NW_SRC] = ipaddr
-    Homework.register_for_packet_match(match_mac, prio, rules)
-
-    del rules[core.DL_SRC]
-    rules[core.DL_DST] = eaddr
-    if ipaddr:
-         del rules[core.NW_SRC]
-         rules[core.NW_DST] = ipaddr
-    Homework.register_for_packet_match(match_mac, prio, rules)
-
-    return ""
-
-def ws_permit(request, args):
-    eaddr = args.get('eaddr')
-    if not eaddr:  return webservice.badRequest(request, "missing eaddr")
-    ipaddr = args.get('ipaddr')
-
-    return permit(eaddr, ipaddr)
-
-def ws_deny(request, args):
-    print request
-    print args
+## webservice boilerplate: URL path component types
 
 class WSPathIPAddress(webservice.WSPathComponent):
     def __init__(self):
@@ -186,6 +114,178 @@ class WSPathEthAddress(webservice.WSPathComponent):
 
         return webservice.WSPathExtractResult(pc)
 
+## other openflow events
+
+def datapath_join(dpid, attrs):
+    ppf(("DPIDJ", dpid, attrs))
+    Homework.st['ports'][dpid] = attrs['ports'][:]
+
+    Homework.install_datapath_flow(
+        dpid,
+        { core.DL_TYPE: ethernet.ethernet.ARP_TYPE, },
+        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+        Actions.flood_and_process,
+        )
+    Homework.install_datapath_flow(
+        dpid,
+        { core.DL_TYPE: ethernet.ethernet.RARP_TYPE, },
+        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+        Actions.flood_and_process,
+        )
+
+    pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE, }
+    for eaddr, ipaddrs in Homework.st['permitted'].items():
+        pattern[core.DL_SRC] = eaddr
+        if not ipaddrs: 
+            Homework.install_datapath_flow(
+                dpid, pattern,
+                openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+                Actions.really_flood
+                )
+##         else:
+##             for ipaddr in ipaddrs:
+##                 pattern[core.NW_SRC] = ipaddr
+##                 Homework.install_datapath_flow(
+##                     dpid, pattern,
+##                     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+##                     Actions.really_flood
+##                     )
+##             del pattern[core.NW_SRC]                
+
+    print "DONE"
+    
+def datapath_leave(dpid):
+    ppf(("DPIDL", dpid, Homework.st['ports'][dpid]))
+    del Homework.st['ports'][dpid]
+    ppf(("\t", Homework.st['ports']))
+
+def table_stats_in(dpid, tables):
+    ppf(("TSI", dpid, tables))
+    ppf(("\t", Homework.st['ports']))
+    ppf(("\t", Homework.st['permitted']))
+
+## webservice entry points
+        
+def permit(eaddr, ipaddr=None):
+
+    ## NB. note that traffic will not necessarily start flowing
+    ## immediately in the case that the router needs to ARP for it.
+    ## not sure why - possibly some negative result caching going on?
+    
+    print "PERMIT", eaddr, ipaddr
+    if not (eaddr or ipaddr): return 
+    
+    eaddr = util.convert_to_eaddr(eaddr)
+    pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+                core.DL_SRC: eaddr,
+                }
+##     old_ipaddrs = None
+    if not ipaddr:
+        old_ipaddrs = Homework.st['permitted'].get(eaddr)
+        Homework.st['permitted'][eaddr] = None
+
+##     else:
+##         ipaddr = util.convert_to_ipaddr(ipaddr)
+        
+##         try: Homework.st['permitted'][eaddr].append(ipaddr)
+##         except: Homework.st['permitted'][eaddr] = [ipaddr]
+
+##         pattern[core.NW_SRC] = ipaddr
+
+    for dpid in Homework.st['ports']:
+        ## permit the forward path to this eaddr, and ipaddr if specified
+        Homework.install_datapath_flow(
+            dpid, pattern,
+            openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+            Actions.really_flood,
+            )
+
+        ## ...and the reverse path similarly
+        del pattern[core.DL_SRC]
+        pattern[core.DL_DST] = eaddr
+        if ipaddr:
+            del pattern[core.NW_SRC]
+            pattern[core.NW_DST] = ipaddr
+        
+        Homework.install_datapath_flow(
+            dpid, pattern,
+            openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+            Actions.really_flood,
+            )
+
+##         if old_ipaddrs:
+##             for ipaddr in old_ipaddrs:
+##                 pattern[core.NW_SRC] = ipaddr
+##                 Homework.delete_strict_datapath_flow(dpid, pattern)
+
+    ## permit IP from MAC, specifying IP addr if available
+##     prio = openflow.OFP_DEFAULT_PRIORITY
+##     rules = { core.DL_TYPE: ethernet.ethernet.IP_TYPE, }
+##     rules[core.DL_SRC] = eaddr
+##     if ipaddr:
+##         rules[core.NW_SRC] = ipaddr
+##     Homework.register_for_packet_match(match_mac_src, prio, rules)
+
+##     del rules[core.DL_SRC]
+##     rules[core.DL_DST] = eaddr
+##     if ipaddr:
+##          del rules[core.NW_SRC]
+##          rules[core.NW_DST] = ipaddr
+##     Homework.register_for_packet_match(match_mac_dst, prio, rules)
+
+    return EMPTY_JSON
+
+def ws_permit(request, args):
+    eaddr = args.get('eaddr')
+    if not eaddr: return webservice.badRequest(request, "missing eaddr")
+
+    ipaddr = args.get('ipaddr')
+    return permit(eaddr, ipaddr)
+
+def deny(eaddr, ipaddr):
+    print "DENY", eaddr, ipaddr
+    if not (eaddr or ipaddr): return 
+    
+    eaddr = util.convert_to_eaddr(eaddr)
+    pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+                core.DL_SRC: eaddr,
+                }
+##     if ipaddr: ipaddrs = [ util.convert_to_ipaddr(ipaddr) ]
+##     else:
+##         ipaddrs = Homework.st['permitted'][eaddr]
+        
+    for dpid in Homework.st['ports']:
+        Homework.delete_strict_datapath_flow(dpid, pattern)
+        ## ...and the reverse path similarly
+        del pattern[core.DL_SRC]
+        pattern[core.DL_DST] = eaddr
+        Homework.delete_strict_datapath_flow(dpid, pattern)
+
+##         if ipaddr:
+##             del pattern[core.NW_SRC]
+##             pattern[core.NW_DST] = ipaddr
+
+
+##         if not ipaddrs: continue
+##         for ipaddr in ipaddrs:
+##             pattern[core.NW_SRC] = ipaddr
+##             Homework.delete_strict_datapath_flow(dpid, pattern)
+
+    return EMPTY_JSON
+
+def ws_deny(request, args):
+    ppf(("REQUEST", request))
+    ppf(("ARGS", args))
+    ppf(("ST", Homework.st))
+
+    eaddr = args.get('eaddr')
+    if not eaddr: return webservice.badRequest(request, "missing eaddr")
+    ipaddr = args.get('ipaddr')
+
+    return deny(eaddr, ipaddr)
+
+## main
+
 class homework(core.Component):
 
     def __init__(self, ctxt):
@@ -193,23 +293,21 @@ class homework(core.Component):
 
         global Homework
         Homework = self
-        Homework.st = {}        
+        Homework.st = { 'permitted': {}, ## eaddr -> None ## [ipaddr, ...]
+                        'ports': {},     ## dpid -> attrs
+                        }
         
     def install(self):
-        Homework.post_callback(TICKER, ticker)
+##         Homework.post_callback(TICKER, ticker)
 
-        prio = openflow.OFP_DEFAULT_PRIORITY
-        rules = { core.DL_TYPE: ethernet.ethernet.ARP_TYPE,
-##                   core.DL_DST: ethernet.ETHER_BROADCAST,
-                  }
-        Homework.register_for_packet_match(match_arp, prio, rules)
+        Homework.register_for_datapath_join(datapath_join)
+        Homework.register_for_datapath_leave(datapath_leave)
+        Homework.register_for_table_stats_in(table_stats_in)
 
-##         for eaddr in NOX_MAC_ADDRS:
-##             print str(eaddr)
-##             rules = { core.DL_SRC: eaddr, }
-##             Homework.register_for_packet_match(match_self, prio, rules)
-##             rules = { core.DL_DST: eaddr, }
-##             Homework.register_for_packet_match(match_self, prio, rules)
+##         prio = openflow.OFP_DEFAULT_PRIORITY
+##         rules = { core.DL_TYPE: ethernet.ethernet.ARP_TYPE,
+##                   }
+##         Homework.register_for_packet_match(match_arp, prio, rules)
 
         ws = self.resolve(str(webservice.webservice))
         v1 = ws.get_version("1")
@@ -370,3 +468,72 @@ def getFactory():
 ##         Homework.st['httpd_thread'] = threading.Thread(target=httpd_worker)
 ##         Homework.st['httpd_thread'].setDaemon(True)
 ##         Homework.st['httpd_thread'].start()
+
+
+########################################################################
+
+## actual state manipulation
+
+## packet match events
+
+## def match_arp(dpid, inport, reason, flen, bufid, packet):
+##     print "*", inport, dpid, packet
+    
+##     Homework.install_datapath_flow(
+##         dpid,
+##         { core.DL_TYPE: ethernet.ethernet.ARP_TYPE, },
+##         openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+##         Actions.flood_and_process,
+##         bufid, openflow.OFP_DEFAULT_PRIORITY, inport, packet.arr)
+##     Homework.install_datapath_flow(
+##         dpid,
+##         { core.DL_TYPE: ethernet.ethernet.RARP_TYPE, },
+##         openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+##         Actions.flood_and_process,
+##         bufid, openflow.OFP_DEFAULT_PRIORITY, inport, packet.arr)
+
+##     return core.CONTINUE
+
+## def match_self(dpid, inport, reason, flen, bufid, packet):
+##     print "=", inport, dpid, packet
+##     return core.CONTINUE
+    
+## def match_mac_src(dpid, inport, reason, flen, bufid, packet):
+##     print "<", packet
+
+##     flow = core.extract_flow(packet)
+##     Homework.install_datapath_flow(
+##         dpid,
+##         { core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+##           core.DL_SRC: flow['dl_src'],
+##           },
+##         openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+##         Actions.really_flood,
+##         bufid, openflow.OFP_DEFAULT_PRIORITY, inport, packet.arr)
+
+##     return core.CONTINUE
+
+## def match_mac_dst(dpid, inport, reason, flen, bufid, packet):
+##     print ">", packet
+
+##     flow = core.extract_flow(packet)
+##     Homework.install_datapath_flow(
+##         dpid,
+##         { core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+##           core.DL_DST: flow['dl_dst'],
+##           },
+##         openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+##         Actions.really_flood,
+##         bufid, openflow.OFP_DEFAULT_PRIORITY, inport, packet.arr)
+
+##     return core.CONTINUE
+
+########################################################################
+
+## IDLE_TIMEOUT = 10
+## CONTROLLER_MAC_ADDR = util.convert_to_eaddr("d4:9a:20:d2:52:8e") ## greyjay
+## CONTROLLER_IP_ADDR = util.convert_to_ipaddr("128.243.35.223")    ## greyjay
+## NOX_MAC_ADDRS = ( util.convert_to_eaddr(e) for e in
+##                   ("00:23:20:85:69:d0", ## dp0
+##                    "00:0c:f1:e2:e3:20", ## eth0
+##                    ))
