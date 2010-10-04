@@ -233,6 +233,7 @@ def deny(eaddr, ipaddr):
         pattern[core.DL_DST] = eaddr
         Homework.delete_strict_datapath_flow(dpid, pattern)
 
+    del Homework.str['permitted'][eaddr]
     return status()
 
 def ws_deny(request, args):
@@ -247,7 +248,12 @@ def ws_deny(request, args):
 def status(eaddr=None):
     """ Permit/Deny status of specified/all addresses. """
 
-    permitted = { "permitted": list(Homework.st['permitted'].keys()), }
+    if not eaddr:
+        permitted = { "permitted": list(map(str, Homework.st['permitted'].keys())), }
+    else:
+        eaddr = util.convert_to_eaddr(eaddr)
+        result = "permitted" if eaddr in permitted else "denied"
+        
     return json.dumps(permitted)
 
 def ws_status(request, args):
