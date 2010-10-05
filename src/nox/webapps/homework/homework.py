@@ -189,7 +189,7 @@ def permit(eaddr, ipaddr=None):
         Homework.install_datapath_flow(
             dpid, pattern,
             openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-            Actions.really_flood_and_process,
+            Actions.really_flood,
             )
 
         ## ...and the reverse path similarly
@@ -202,7 +202,7 @@ def permit(eaddr, ipaddr=None):
         Homework.install_datapath_flow(
             dpid, pattern,
             openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-            Actions.really_flood_and_process,
+            Actions.really_flood,
             )
 
     return status()
