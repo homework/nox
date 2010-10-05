@@ -185,11 +185,11 @@ def permit(eaddr, ipaddr=None):
         Homework.st['permitted'][eaddr] = None
 
     for dpid in Homework.st['ports']:
-        ## permit the forward path to this eaddr, and ipaddr if specified
+        ## permit the forward path to this eaddr/ipaddr
         Homework.install_datapath_flow(
             dpid, pattern,
             openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-            Actions.really_flood,
+            Actions.really_flood_and_process,
             )
 
         ## ...and the reverse path similarly
@@ -202,7 +202,7 @@ def permit(eaddr, ipaddr=None):
         Homework.install_datapath_flow(
             dpid, pattern,
             openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-            Actions.really_flood,
+            Actions.really_flood_and_process,
             )
 
     return status()
@@ -233,7 +233,7 @@ def deny(eaddr, ipaddr):
         pattern[core.DL_DST] = eaddr
         Homework.delete_strict_datapath_flow(dpid, pattern)
 
-    del Homework.str['permitted'][eaddr]
+    del Homework.st['permitted'][eaddr]
     return status()
 
 def ws_deny(request, args):
