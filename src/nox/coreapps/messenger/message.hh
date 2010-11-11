@@ -13,7 +13,7 @@
  * Content is application specific and the types connect, disconnect, ping and 
  * echo are reserved for use by vigil::jsonmessenger.
  * 
- * A user can can the TCP and SSL port for vigil::jsonmessenger at commandline using
+ * A user can define the TCP and SSL port for vigil::jsonmessenger at commandline using
  * tcpport and sslport arguments for jsonmessenger respectively. 
  * port 0 is interpreted as disabling the server socket.  
  * E.g.,
