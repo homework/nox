@@ -19,7 +19,10 @@
 #ifndef dhcp_HH
 #define dhcp_HH
 
+#include <vector>
+
 #include "component.hh"
+#include "netinet++/datapathid.hh"
 #include "config.h"
 
 #ifdef LOG4CXX_ENABLED
@@ -84,9 +87,29 @@ namespace vigil
      * A generic handler for packet_in events. This hopefully 
      * will mature latter to more specific functionality.
      */
-    Disposition handler(const Event& e);
+    Disposition packet_in_handler(const Event& e);
+
+    /**
+     * \brief check when new switches join
+     *
+     * required in order to get a list of registered switches
+     */
+    Disposition datapath_join_handler(const Event& e);
+
+    /**
+     * \brief check when switches leave
+     *
+     * required in order to get a list of registered switches
+     */
+    Disposition datapath_leave_handler(const Event& e);
   private:
     size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, uint16_t dhcp_len, Flow *flow);
+    void refresh_default_flows();
+
+    std::vector<datapathid*> registered_datapath;
+    //    uint16_t datapath_count;
+    //uint16_t datapath_max;
+    //datapathid *registered_datapath;
 
   };
 }
