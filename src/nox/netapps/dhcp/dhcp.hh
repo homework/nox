@@ -20,6 +20,8 @@
 #define dhcp_HH
 
 #include <vector>
+#include <map>
+#include <utility>
 
 #include "component.hh"
 #include "netinet++/datapathid.hh"
@@ -34,10 +36,39 @@
 
 #include "dhcp_msg.hh"
 
+#include "netinet++/ethernetaddr.hh"
+#include "netinet++/ipaddr.hh"
+
 namespace vigil
 {
   using namespace std;
   using namespace vigil::container;
+
+  struct dhcp_mapping {
+    struct ipaddr ip;
+    struct ethernetaddr mac;
+    uint32_t lease_end;
+    
+    //------------------------------------------
+    // string representation
+    //------------------------------------------
+    dhcp_mapping(const dhcp_mapping&);
+    dhcp_mapping(const  ipaddr&, const  ethernetaddr&, uint32_t lease_end);
+
+    //------------------------------------------
+    // string representation
+    //------------------------------------------
+    std::string string() const;
+    // -------------------------------------
+    // Comparison Operators
+    // ------------------------------------
+    bool operator == (const dhcp_mapping&) const;
+    bool operator == (const ethernetaddr&) const;
+    bool operator == (const ipaddr&) const;
+    //bool operator == (const ipaddr&, const ethernetaddr&) const;
+  };
+
+
 
   /** \brief dhcp
    * \ingroup noxcomponents
@@ -103,13 +134,19 @@ namespace vigil
      */
     Disposition datapath_leave_handler(const Event& e);
   private:
-    size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, uint16_t dhcp_len, Flow *flow);
+    size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
+			       uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 
+			       uint8_t dhcp_msg_type);
     void refresh_default_flows();
+    ipaddr select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) ;
+    bool check_access(const ethernetaddr& ether);
 
+    //somewhere to store the datapaths
     std::vector<datapathid*> registered_datapath;
-    //    uint16_t datapath_count;
-    //uint16_t datapath_max;
-    //datapathid *registered_datapath;
+
+    //storage of the ip to mac translation throught the dhcp protocol 
+    std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
+    std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
 
   };
 }

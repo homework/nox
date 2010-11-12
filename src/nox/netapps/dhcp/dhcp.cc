@@ -2,6 +2,8 @@
 
 #include <boost/bind.hpp>
 #include <boost/shared_array.hpp>
+#include <map>
+#include <utility>
 #include <net/ethernet.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
@@ -17,7 +19,18 @@
 #include "netinet++/ethernet.hh"
 #include "netinet++/ip.hh"
 
+#define ROUTABLE_SUBNET "10.1.0.0"
+#define ROUTABLE_NETMASK 18
+
+
+#define NON_ROUTABLE_SUBNET "10.2.0.0"
+#define NON_ROUTABLE_NETMASK 18
+
 #define FLOW_TIMEOUT_DURATION 10
+
+const char *dhcp_msg_type_name[] = {NULL, "DHCPDiscover", "DHCPOffer", 
+				    "DHCPRequest", "DHCPDecline", "DHCPAck", 
+				    "DHCPNak", "DHCPRelease", "DHCPInform"};
 
 //check uhdhcp
 
@@ -42,7 +55,6 @@ namespace vigil
       generate_openflow_dhcp_flow(ofm, size);
       send_openflow_command(**it, &ofm->header, true);
     }
-
     timeval tv = {FLOW_TIMEOUT_DURATION,0};
     post(boost::bind(&dhcp::refresh_default_flows, this), tv);
   }
@@ -59,6 +71,42 @@ namespace vigil
     generate_openflow_dhcp_flow(ofm, size);
     send_openflow_command(pi.datapath_id, &ofm->header, true);
     return CONTINUE;
+  }
+
+  bool 
+  dhcp::check_access(const ethernetaddr& ether) {
+    return true;
+  }
+
+  ipaddr 
+  dhcp::select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) {
+    map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter_ether;
+    map<struct ipaddr, struct dhcp_mapping *>::iterator iter_ip;
+    struct dhcp_mapping *state;
+
+    printf("looking mac %s with dhcp msg type : %s\n", 
+	   ether.string().c_str(), dhcp_msg_type_name[dhcp_msg_type]);
+
+    //firstly check if the mac address is aloud access
+    bool is_routable = this->check_access(ether); 
+      //check now if we can find the MAC in the list 
+    if( (iter_ether = this->mac_mapping.find(ether)) != this-> mac_mapping.end()) {
+      printf("found mapping for addr %s -> %s\n", ether.string().c_str(), state->string().c_str());
+      state = iter_ether->second;
+      // //sanity check 
+      // iter_ip = (this->ip_mapping.find(state->ip));
+      // if((iter_ip == this->ip_mapping.end()) || (this->ip_mapping[iter_ip->first] != state)) {
+      // 	printf("two hashmaps are not consistent. I am terminating.\n");
+      // 	exit(1);
+      //}
+    } else {
+      state = new dhcp_mapping(ipaddr("10.1.0.1"), ether, 0);
+      printf("inserting new entry for %s - %s\n", ether.string().c_str(), state->string().c_str());
+      this->mac_mapping[ether] = state;
+      //I need to find here the appropriate ip addr
+    } 
+
+    return ipaddr("10.1.0.1");
   }
 
   Disposition dhcp::datapath_leave_handler(const Event& e) {
@@ -128,24 +176,43 @@ namespace vigil
     //analyse options and reply respectively.
     data_len -= sizeof(struct dhcp_packet);
     pointer +=  sizeof(struct dhcp_packet);
+
+    uint8_t dhcp_msg_type = 0;
     while(data_len > 2) {
       uint8_t dhcp_option = data[pointer];
       uint8_t dhcp_option_len = data[pointer+1];
-      printf("pointer:%d, option %02x, len:%02x, option %02x, len:%02x\n", pointer, 
-	     data[pointer], data[pointer+1],  dhcp_option,  dhcp_option_len );
-      data_len -=(2 + dhcp_option_len );
-      pointer +=(2 + dhcp_option_len );
+      //printf("pointer:%d, cookie:%llx, option %02x, len:%02x, option %02x, len:%02x\n", pointer,  
+      //	     (long long unsigned int)dhcp->cookie, data[pointer], data[pointer+1],  dhcp_option,  
+      //	     dhcp_option_len);
       
+      if(dhcp_option == 53) {
+	dhcp_msg_type = data[pointer + 2];
+	if((dhcp_msg_type <1) || (dhcp_msg_type > 8)) {
+	  printf("Invalid DHCP Message Type : %d\n", dhcp_msg_type);
+	  return STOP;
+	}
+	//printf("dhcp msg type : %s\n", dhcp_msg_type_name[dhcp_msg_type]);
+	break;
+      }
       if(dhcp_option == 0xff) {
       	printf("Got end of options!!!!\n");
      	break;
       }
+      data_len -=(2 + dhcp_option_len );
+      pointer +=(2 + dhcp_option_len );
     }
+    //Must create a fucntion that chooses this ip for the state of the DHCP server. 
+    //uint32_t send_ip = htonl(inet_addr("10.1.1.1"));
 
-    size_t len = generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow);
+    ipaddr send_ip = this->select_ip(ethernetaddr(ether->ether_shost), dhcp_msg_type);
+
+    uint8_t reply_msg_type = (dhcp_msg_type == DHCPDISCOVER? 
+			      DHCPOFFER:DHCPACK);
+
+    size_t len = generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, 
+				     send_ip, reply_msg_type);
     send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
 			 OFPP_IN_PORT, pi.in_port, 1);
-
     return STOP;
   }
   
@@ -167,13 +234,14 @@ namespace vigil
   }
 
   size_t
-  dhcp::generate_dhcp_reply(uint8_t **ret, struct dhcp_packet  * dhcp, uint16_t dhcp_len,
-			    Flow *flow) {
+  dhcp::generate_dhcp_reply(uint8_t **ret, struct dhcp_packet  * dhcp, 
+			    uint16_t dhcp_len, Flow *flow, uint32_t send_ip,
+			    uint8_t dhcp_msg_type) {
     //uint8_t *ret = NULL;
-    int len =  sizeof( struct ether_header) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dhcp_packet);
-    printf("ether:%d, ip:%d, udp:%d, dhcp: %d, packet len: %d\n ", 
-	   sizeof( struct ether_header), sizeof(struct iphdr),
-	   sizeof(struct udphdr),  sizeof(struct dhcp_packet), len);
+    int len =  sizeof( struct ether_header) + sizeof(struct iphdr) + 
+      sizeof(struct udphdr) + sizeof(struct dhcp_packet) + 3 + 6 + 6 + 6 + 6 + 6 + 1;
+    //message_type + netmask + router + nameserver + lease_time + end option
+    //lease time is seconds since it will timeout
 
     //allocate space for he dhcp reply
     *ret = new uint8_t[len];
@@ -194,12 +262,11 @@ namespace vigil
     ip->version = 4;
     ip->tos = 0; 
     ip->tot_len = htons(len - sizeof(struct ether_header));
-    printf("ip packet len: %d\n", len - sizeof(struct ether_header));
     ip->id = 0;
     ip->frag_off = 0;
     ip->ttl = 0x80;
     ip->protocol = 0x11;
-    ip->saddr =   inet_addr("10.2.0.1"); 
+    ip->saddr =   htonl(send_ip + 1); 
     ip->daddr =  inet_addr("255.255.255.255");
     ip->check = ip_::checksum(ip, 20);
 
@@ -208,44 +275,132 @@ namespace vigil
 					   sizeof(struct iphdr));
     udp->source = htons(67);
     udp->dest = htons(68);
-    udp->len = htons(sizeof(struct udphdr) + sizeof(struct dhcp_packet));
+    udp->len = htons(len - sizeof(struct ether_header) - sizeof(struct iphdr));
     udp->check = 0x0;
 
-    struct dhcp_packet  *reply = (struct dhcp_packet *)(*ret + sizeof(struct ether_header) + 
+    struct dhcp_packet  *reply = (struct dhcp_packet *)(*ret + 
+							sizeof(struct ether_header) + 
 							sizeof(struct iphdr) + sizeof(struct udphdr));
-
     reply->op = BOOTREPLY;
     reply->htype = 0x01;
     reply->hlen = 0x6;
     reply->xid = dhcp->xid;
-    reply->yiaddr = (uint32_t)inet_addr("10.2.0.2");
-    reply->siaddr =  (uint32_t)inet_addr("10.2.0.1"); 
+    reply->yiaddr = (uint32_t)htonl(send_ip); //inet_addr("10.2.0.2");
+    reply->siaddr =  (uint32_t)htonl(send_ip + 1); //inet_addr("10.2.0.1"); 
     memcpy(reply->chaddr, (const uint8_t *)flow->dl_src, 6);
+    reply->cookie =  dhcp->cookie; //inet_addr("10.2.0.1"); 
+
+    //setting up options
+    uint8_t *options = (uint8_t *)(*ret + sizeof(struct ether_header) + 
+				   sizeof(struct iphdr) +sizeof(struct udphdr) + 
+				   sizeof(struct dhcp_packet));
+    
+    //setting up dhcp msg type
+    options[0] = 53;
+    options[1] = 1;
+    options[2] = dhcp_msg_type;
+    options += 3;
+    //netmask 
+    options[0] = 1;
+    options[1] = 4;
+    *((uint32_t *)(options + 2)) = htonl(0xFFFFFFFC); 
+    options += 6;
+    //router 
+    options[0] = 3;
+    options[1] = 4;
+    *((uint32_t *)(options + 2)) = htonl(send_ip+1); 
+    options += 6;
+    //nameserver
+    options[0] = 6;
+    options[1] = 4;
+    *((uint32_t *)(options + 2)) = htonl(send_ip+1); 
+    options += 6;
+    //lease_time
+    options[0] = 51;
+    options[1] = 4;
+    *((uint32_t *)(options + 2)) = htonl(30); 
+    options += 6;
+    //router 
+    options[0] = 54;
+    options[1] = 4;
+    *((uint32_t *)(options + 2)) = htonl(send_ip+1); 
+    options += 6;
+    //set end of options
+    options[0] = 0xff;
+    
 
     //analyse options and reply respectively.
-    uint8_t *data = (dhcp->options - 1);
-    uint16_t  data_len = dhcp_len - sizeof(struct dhcp_packet);
-  
-    uint16_t pointer = 0;
-    while(data_len > 0) {
-      uint8_t dhcp_option = data[pointer];
-      uint8_t dhcp_option_len = data[pointer+1];
-      printf("cookie:%llx, option %x, len:%x\n", dhcp->cookie, dhcp_option, dhcp_option_len);
-      pointer +=(2 + dhcp_option_len);
-      data_len -=(2 + dhcp_option_len);
-    
-      if(dhcp_option_len == 0) {
-    	printf("Got an option with zero length!!!!\n");
-    	break;
-      }
-    }
+    // uint8_t *data = (dhcp->options - 1);
+    // uint16_t  data_len = dhcp_len - sizeof(struct dhcp_packet);
+    // uint16_t pointer = 1;
+    // while(data_len > 0) {
+    //   uint8_t dhcp_option = data[pointer];
+    //   uint8_t dhcp_option_len = data[pointer+1];
+    //   printf("cookie:%llx, option %x, len:%x\n", (long long unsigned int)dhcp->cookie, 
+    // 	     dhcp_option, dhcp_option_len);
+    //   pointer +=(2 + dhcp_option_len);
+    //   data_len -=(2 + dhcp_option_len);
+    //   if(dhcp_option_len == 0) {
+    // 	printf("Got an option with zero length!!!!\n");
+    // 	break;
+    //   }
+    // }
 
     return len;
 
   }
-  
+
   REGISTER_COMPONENT(Simple_component_factory<dhcp>,
 		     dhcp);
+  //-------------------------
+  // dhcp_mapping implementation
+  //-------------------------
+  inline
+  dhcp_mapping::dhcp_mapping(const dhcp_mapping& in) {
+    ip=in.ip;
+    mac = in.mac;
+    lease_end = in.lease_end;
+  }
+  
+  inline
+  dhcp_mapping::dhcp_mapping(const  ipaddr& _ip, const  ethernetaddr& _mac, uint32_t _lease_end) {
+    ip = _ip;
+    mac = _mac;
+    lease_end = _lease_end;
+  }
+
+  inline
+  std::string 
+  dhcp_mapping::string() const{
+    //max uint32_t has 9 decimal digits
+    uint16_t str_len = sizeof("255.255.255.255 FF:FF:FF:FF:FF:FF XXXXXXXXXX");
+    char  buf[str_len];
+    
+    snprintf(buf, str_len, "%s %s %llu", ip.string().c_str(), mac.string().c_str(), 
+	     (long long unsigned int)lease_end);
+    
+    return std::string(buf);
+  }
+
+  inline bool 
+  dhcp_mapping::operator == (const dhcp_mapping& dhcp) const {
+    return ((dhcp.ip == this->ip) && (dhcp.mac == this->mac) ); //&& (dhcp.lease_end == this.lease_end) );
+    
+  }
+  inline bool 
+  dhcp_mapping::operator == (const ethernetaddr& mac) const {
+    return (mac == this->mac);
+  }
+  inline bool 
+  dhcp_mapping::operator == (const ipaddr& ip) const {
+   return (ip == this->ip);    
+  }
+  
+  // inline bool 
+  // dhcp_mapping::operator == (const ipaddr&, const ethernetaddr&) const {
+  //   return ((dhcp.ip == ip) && (dhcp.mac == mac));
+  // }
+
 } // vigil namespace
 
 inline void 
@@ -253,10 +408,11 @@ generate_openflow_dhcp_flow(ofp_flow_mod* ofm, size_t size) {
   ofm->header.version = OFP_VERSION;
   ofm->header.type = OFPT_FLOW_MOD;
   ofm->header.length = htons(size);
-  ofm->match.wildcards = htonl(OFPFW_IN_PORT |  OFPFW_DL_VLAN | OFPFW_DL_VLAN_PCP | 
-			       OFPFW_NW_TOS |  OFPFW_DL_SRC |  OFPFW_DL_DST);
+  ofm->match.wildcards = htonl(OFPFW_IN_PORT |  OFPFW_DL_VLAN | 
+			       OFPFW_DL_VLAN_PCP | OFPFW_NW_TOS |  OFPFW_DL_SRC |  
+			       OFPFW_DL_DST | OFPFW_NW_SRC_ALL);
   ofm->match.dl_type = htons(0x0800);
-  ofm->match.nw_src = inet_addr("0.0.0.0");
+  //ofm->match.nw_src = inet_addr("0.0.0.0");
   ofm->match.nw_dst =  inet_addr("255.255.255.255");
   ofm->match.nw_proto = 17;
   ofm->match.tp_src = htons(68);
