@@ -3,6 +3,13 @@
         {
             "name": "dhcp" ,
             "library": "dhcp" 
+        },
+        {	
+            "name": "pydhcp" ,
+            "dependencies": [
+                "dhcp"
+            ],
+            "python": "nox.netapps.dhcp.pydhcp"
         }
     ]
 }

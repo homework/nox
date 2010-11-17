@@ -18,13 +18,17 @@
 
 #include "netinet++/ethernet.hh"
 #include "netinet++/ip.hh"
+#include "netinet++/ipaddr.hh"
 
-#define ROUTABLE_SUBNET "10.1.0.0"
-#define ROUTABLE_NETMASK 18
+#define MAX_ROUTABLE_LEASE_DURATION 30
+#define MAX_NON_ROUTABLE_LEASE_DURATION 30
 
+#define ROUTABLE_SUBNET "10.2.0.0"
+#define ROUTABLE_NETMASK 16
+#define MAX_IP_LEN 32
 
-#define NON_ROUTABLE_SUBNET "10.2.0.0"
-#define NON_ROUTABLE_NETMASK 18
+#define NON_ROUTABLE_SUBNET "10.3.0.0"
+#define NON_ROUTABLE_NETMASK 16
 
 #define FLOW_TIMEOUT_DURATION 10
 
@@ -83,30 +87,74 @@ namespace vigil
     map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter_ether;
     map<struct ipaddr, struct dhcp_mapping *>::iterator iter_ip;
     struct dhcp_mapping *state;
+    bool is_routable;
+    uint32_t ip = 0 ;
+    uint32_t max_ip = 0;
+    uint32_t len = 0;
+    uint32_t inc = 4;
+    int i;
+    timeval tv;
 
     printf("looking mac %s with dhcp msg type : %s\n", 
 	   ether.string().c_str(), dhcp_msg_type_name[dhcp_msg_type]);
-
+    
     //firstly check if the mac address is aloud access
-    bool is_routable = this->check_access(ether); 
-      //check now if we can find the MAC in the list 
+    is_routable = this->check_access(ether); 
+    //check now if we can find the MAC in the list 
     if( (iter_ether = this->mac_mapping.find(ether)) != this-> mac_mapping.end()) {
-      printf("found mapping for addr %s -> %s\n", ether.string().c_str(), state->string().c_str());
       state = iter_ether->second;
-      // //sanity check 
-      // iter_ip = (this->ip_mapping.find(state->ip));
-      // if((iter_ip == this->ip_mapping.end()) || (this->ip_mapping[iter_ip->first] != state)) {
-      // 	printf("two hashmaps are not consistent. I am terminating.\n");
-      // 	exit(1);
-      //}
+      printf("found mapping for addr %s -> %s\n", ether.string().c_str(), state->string().c_str());
     } else {
-      state = new dhcp_mapping(ipaddr("10.1.0.1"), ether, 0);
+      //find a free ip
+      gettimeofday(&tv, NULL);
+
+      if(is_routable) {
+	ip = ntohl(inet_addr(ROUTABLE_SUBNET));
+	len = ROUTABLE_NETMASK;
+      } else {
+	ip = ntohl(inet_addr(NON_ROUTABLE_SUBNET));
+	len = NON_ROUTABLE_NETMASK;
+      }
+      for( i = 0; i < (MAX_IP_LEN - len - 2); i++)
+	max_ip = (max_ip << 1) + 1;
+      //the last two bits are kept in case for the subnetting of the localnetowkr 
+      max_ip = (max_ip << 2);
+      max_ip = max_ip | ip;
+      for (; ip <= max_ip; ip += inc) {
+	if((iter_ip = this->ip_mapping.find(ipaddr(ip))) == this->ip_mapping.end())
+	  break;
+	
+	//if the lease has ended for less than 30 minutes then keep the mapping just in case
+	if( tv.tv_sec - iter_ip->second->lease_end > 30*60 )
+	  continue;
+	
+	//if everything above passed then we have to kick this mapping for the next device
+	ethernetaddr ether = iter_ip->second->mac;
+	delete iter_ip->second;
+	this->ip_mapping.erase(ip);
+	if(this->mac_mapping.find(ether) != this->mac_mapping.end()) {
+	  this->mac_mapping.erase(ether);
+	}
+	break;
+      }
+      
+      if(ip > max_ip) {
+	printf("wtf!!!! run out of ip's????\n");
+	exit(1);
+      }
+
+      //check whether you might need to delete some old mapping on the ip map.
+      
+      //create state with new ip and send it out.
+      state = new dhcp_mapping(ipaddr(ip), ether, tv.tv_sec + (is_routable)?
+			       MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
       printf("inserting new entry for %s - %s\n", ether.string().c_str(), state->string().c_str());
       this->mac_mapping[ether] = state;
+      this->ip_mapping[ipaddr(ip)] = state;
       //I need to find here the appropriate ip addr
     } 
-
-    return ipaddr("10.1.0.1");
+    ip+=1;
+    return ipaddr(ip);
   }
 
   Disposition dhcp::datapath_leave_handler(const Event& e) {
@@ -160,7 +208,6 @@ namespace vigil
       printf("Not UDP");
       return CONTINUE;
     }
-
     //parse udp header
     struct udphdr *udp = (struct udphdr *)(data + pointer);
     if( (ntohs(udp->dest) != 67) || (ntohs(udp->source) != 68)) {
@@ -348,6 +395,16 @@ namespace vigil
 
     return len;
 
+  }
+
+  std::list<dhcp_mapping> 
+  get_dhcp_mappings() {
+    
+  }
+
+  std::string
+  dhcp::hello_world() {
+    return string("Hello World!!!");
   }
 
   REGISTER_COMPONENT(Simple_component_factory<dhcp>,

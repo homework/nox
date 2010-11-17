@@ -20,6 +20,7 @@ ppf = pprint.pprint
 import simplejson as json
 
 from nox.webapps.webservice import webservice
+from nox.netapps.dhcp.pydhcp import pydhcp_app
 from nox.lib import core, openflow, packet, util
 from nox.lib.packet import ethernet, ipv4
 
@@ -284,6 +285,11 @@ class homework(core.Component):
 
         ws = self.resolve(str(webservice.webservice))
         v1 = ws.get_version("1")
+
+        self._dhcp = self.resolve(pydhcp_app)
+        print self._dhcp
+        print ("XXXXXXXXXXXXX %s XXXXXXXXXXXXXX"%self._dhcp.hello_world() )
+
 
         homeworkp = webservice.WSPathStaticString("homework")
 

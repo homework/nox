@@ -133,6 +133,9 @@ namespace vigil
      * required in order to get a list of registered switches
      */
     Disposition datapath_leave_handler(const Event& e);
+
+
+    std::string hello_world();
   private:
     size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
 			       uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 

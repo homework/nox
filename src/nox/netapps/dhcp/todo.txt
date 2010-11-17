@@ -1,0 +1,18 @@
+1) Test how bridging will work.
+2) Test dhcp code.
+   - How the ip assignment work? Do I get unique ips? Do I get the same ip if I ask again? Develop test scenarios with the python script that does fake dhcp requests. 
+   - How can I query homework module and know if a mac address is allowed to get an ip.
+   - How can I invalidate an IP address? (Allow a hook in the object that I will use to do the bridging of the interfaces. )
+   - Develop a web service to get the assignment status of the dhcp server.  <----
+
+3) Perform a test with arp poisonning.
+   - Can two client communicate if they both know their mac address?
+   - Can I detect something like this? 
+4) Test dhcp code with different clients:
+   - Linux (check what dhcp clients are there? Maybe check also older versions? )
+   - Windows (windows, vista and windows 7)
+   - MAC osx (also ipad, iphone)
+   - game machine (PS3? )
+   - android (expected to be the same as linux )
+   - busybox dhcp implementation (Expected on some embeded linux devices)
+   - 
