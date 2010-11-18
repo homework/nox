@@ -44,32 +44,6 @@ namespace vigil
   using namespace std;
   using namespace vigil::container;
 
-  struct dhcp_mapping {
-    struct ipaddr ip;
-    struct ethernetaddr mac;
-    uint32_t lease_end;
-    
-    //------------------------------------------
-    // string representation
-    //------------------------------------------
-    dhcp_mapping(const dhcp_mapping&);
-    dhcp_mapping(const  ipaddr&, const  ethernetaddr&, uint32_t lease_end);
-
-    //------------------------------------------
-    // string representation
-    //------------------------------------------
-    std::string string() const;
-    // -------------------------------------
-    // Comparison Operators
-    // ------------------------------------
-    bool operator == (const dhcp_mapping&) const;
-    bool operator == (const ethernetaddr&) const;
-    bool operator == (const ipaddr&) const;
-    //bool operator == (const ipaddr&, const ethernetaddr&) const;
-  };
-
-
-
   /** \brief dhcp
    * \ingroup noxcomponents
    * 
@@ -133,9 +107,9 @@ namespace vigil
      * required in order to get a list of registered switches
      */
     Disposition datapath_leave_handler(const Event& e);
-
-
+    
     std::string hello_world();
+    std::vector<std::string> get_dhcp_mapping(); 
   private:
     size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
 			       uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 

@@ -8,11 +8,21 @@
 #include "dhcp_proxy.hh"
 #include "../../coreapps/pyrt/pycontext.hh"
 #include <string>
+#include <vector>
 using namespace vigil;
 using namespace vigil::applications;
 %}
 
+%include "typemaps.i"
+%include "std_string.i"
+%include "std_vector.i"
+// Instantiate templates used by example
+namespace std {
+  %template(IntVector) vector<string>;
+}
+
 %include "dhcp_proxy.hh"
+ //%include "dhcp.hh"
 
 %pythoncode
 %{
@@ -43,8 +53,11 @@ using namespace vigil::applications;
       def hello_world(self):
         return self.pscpa.hello_world()
 
-       def register_object(self, obj):
-         self.pscpa.register_object(obj)
+      def get_dhcp_mapping(self):
+        return self.pscpa.get_mapping()
+
+      def register_object(self, obj):
+        self.pscpa.register_object(obj)
 
   def getFactory():
         class Factory():

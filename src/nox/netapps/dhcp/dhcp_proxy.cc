@@ -51,10 +51,16 @@ namespace vigil {
       return this->p_dhcp->hello_world(); //string("Hello World!!!");
     }
 
-    void 
-    dhcp_proxy::register_object(PyObject *p_obj) {
-      this->p_hw = p_obj;
-    }
+    //std::vector<dhcp_mapping> 
+    // int
+    // dhcp_proxy::get_mapping() {
+    //   return  this->p_dhcp->get_dhcp_mapping();
+    // }
+
+    // void 
+    // dhcp_proxy::register_object(PyObject *p_obj) {
+    //   this->p_hw = p_obj;
+    // }
 
   
   } // namespace applications

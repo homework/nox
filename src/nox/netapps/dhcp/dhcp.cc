@@ -19,6 +19,7 @@
 #include "netinet++/ethernet.hh"
 #include "netinet++/ip.hh"
 #include "netinet++/ipaddr.hh"
+#include "dhcp_mapping.hh"
 
 #define MAX_ROUTABLE_LEASE_DURATION 30
 #define MAX_NON_ROUTABLE_LEASE_DURATION 30
@@ -95,6 +96,13 @@ namespace vigil
     int i;
     timeval tv;
 
+    //define what is the maximum ip we can use. 
+    for( i = 0; i < (MAX_IP_LEN - len - 2); i++)
+      max_ip = (max_ip << 1) + 1;
+    //the last two bits are kept in case for the subnetting of the local network
+    max_ip = (max_ip << 2);
+    max_ip = max_ip | ip;
+    
     printf("looking mac %s with dhcp msg type : %s\n", 
 	   ether.string().c_str(), dhcp_msg_type_name[dhcp_msg_type]);
     
@@ -103,6 +111,7 @@ namespace vigil
     //check now if we can find the MAC in the list 
     if( (iter_ether = this->mac_mapping.find(ether)) != this-> mac_mapping.end()) {
       state = iter_ether->second;
+      ip = ntohl(state->ip);
       printf("found mapping for addr %s -> %s\n", ether.string().c_str(), state->string().c_str());
     } else {
       //find a free ip
@@ -115,11 +124,6 @@ namespace vigil
 	ip = ntohl(inet_addr(NON_ROUTABLE_SUBNET));
 	len = NON_ROUTABLE_NETMASK;
       }
-      for( i = 0; i < (MAX_IP_LEN - len - 2); i++)
-	max_ip = (max_ip << 1) + 1;
-      //the last two bits are kept in case for the subnetting of the localnetowkr 
-      max_ip = (max_ip << 2);
-      max_ip = max_ip | ip;
       for (; ip <= max_ip; ip += inc) {
 	if((iter_ip = this->ip_mapping.find(ipaddr(ip))) == this->ip_mapping.end())
 	  break;
@@ -128,9 +132,9 @@ namespace vigil
 	if( tv.tv_sec - iter_ip->second->lease_end > 30*60 )
 	  continue;
 	
-	//if everything above passed then we have to kick this mapping for the next device
+	//if everything above passed then we have to invalidate this mapping and keep the ip addr
 	ethernetaddr ether = iter_ip->second->mac;
-	delete iter_ip->second;
+	if(iter_ip->second != NULL) delete iter_ip->second;
 	this->ip_mapping.erase(ip);
 	if(this->mac_mapping.find(ether) != this->mac_mapping.end()) {
 	  this->mac_mapping.erase(ether);
@@ -154,6 +158,7 @@ namespace vigil
       //I need to find here the appropriate ip addr
     } 
     ip+=1;
+    printf("%lX\n", ip);
     return ipaddr(ip);
   }
 
@@ -252,12 +257,13 @@ namespace vigil
     //uint32_t send_ip = htonl(inet_addr("10.1.1.1"));
 
     ipaddr send_ip = this->select_ip(ethernetaddr(ether->ether_shost), dhcp_msg_type);
+    printf("send_ip : %s\n", send_ip.string().c_str());
 
     uint8_t reply_msg_type = (dhcp_msg_type == DHCPDISCOVER? 
 			      DHCPOFFER:DHCPACK);
 
     size_t len = generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, 
-				     send_ip, reply_msg_type);
+				     ntohl((uint32_t)send_ip), reply_msg_type);
     send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
 			 OFPP_IN_PORT, pi.in_port, 1);
     return STOP;
@@ -303,7 +309,7 @@ namespace vigil
     ether->ether_shost[2]=0x27; ether->ether_shost[3]=0xee;
     ether->ether_shost[4]=0x1d;ether->ether_shost[5]=0x9f;
  
-    //setting up ip header details   
+   //setting up ip header details   
     struct iphdr *ip = (struct iphdr *) (*ret + sizeof(struct ether_header));
     ip->ihl = 5;
     ip->version = 4;
@@ -374,32 +380,7 @@ namespace vigil
     options += 6;
     //set end of options
     options[0] = 0xff;
-    
-
-    //analyse options and reply respectively.
-    // uint8_t *data = (dhcp->options - 1);
-    // uint16_t  data_len = dhcp_len - sizeof(struct dhcp_packet);
-    // uint16_t pointer = 1;
-    // while(data_len > 0) {
-    //   uint8_t dhcp_option = data[pointer];
-    //   uint8_t dhcp_option_len = data[pointer+1];
-    //   printf("cookie:%llx, option %x, len:%x\n", (long long unsigned int)dhcp->cookie, 
-    // 	     dhcp_option, dhcp_option_len);
-    //   pointer +=(2 + dhcp_option_len);
-    //   data_len -=(2 + dhcp_option_len);
-    //   if(dhcp_option_len == 0) {
-    // 	printf("Got an option with zero length!!!!\n");
-    // 	break;
-    //   }
-    // }
-
     return len;
-
-  }
-
-  std::list<dhcp_mapping> 
-  get_dhcp_mappings() {
-    
   }
 
   std::string
@@ -407,56 +388,20 @@ namespace vigil
     return string("Hello World!!!");
   }
 
+  std::vector<std::string> 
+  dhcp::get_dhcp_mapping() { 
+    std::map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter = 
+      this->mac_mapping.begin();
+    std::vector<std::string> v;
+    for (; iter != this->mac_mapping.end(); iter++) {
+      if(iter->second == NULL) continue;
+      v.push_back(iter->second->string()); 
+    }
+    return v;
+  };
+
   REGISTER_COMPONENT(Simple_component_factory<dhcp>,
 		     dhcp);
-  //-------------------------
-  // dhcp_mapping implementation
-  //-------------------------
-  inline
-  dhcp_mapping::dhcp_mapping(const dhcp_mapping& in) {
-    ip=in.ip;
-    mac = in.mac;
-    lease_end = in.lease_end;
-  }
-  
-  inline
-  dhcp_mapping::dhcp_mapping(const  ipaddr& _ip, const  ethernetaddr& _mac, uint32_t _lease_end) {
-    ip = _ip;
-    mac = _mac;
-    lease_end = _lease_end;
-  }
-
-  inline
-  std::string 
-  dhcp_mapping::string() const{
-    //max uint32_t has 9 decimal digits
-    uint16_t str_len = sizeof("255.255.255.255 FF:FF:FF:FF:FF:FF XXXXXXXXXX");
-    char  buf[str_len];
-    
-    snprintf(buf, str_len, "%s %s %llu", ip.string().c_str(), mac.string().c_str(), 
-	     (long long unsigned int)lease_end);
-    
-    return std::string(buf);
-  }
-
-  inline bool 
-  dhcp_mapping::operator == (const dhcp_mapping& dhcp) const {
-    return ((dhcp.ip == this->ip) && (dhcp.mac == this->mac) ); //&& (dhcp.lease_end == this.lease_end) );
-    
-  }
-  inline bool 
-  dhcp_mapping::operator == (const ethernetaddr& mac) const {
-    return (mac == this->mac);
-  }
-  inline bool 
-  dhcp_mapping::operator == (const ipaddr& ip) const {
-   return (ip == this->ip);    
-  }
-  
-  // inline bool 
-  // dhcp_mapping::operator == (const ipaddr&, const ethernetaddr&) const {
-  //   return ((dhcp.ip == ip) && (dhcp.mac == mac));
-  // }
 
 } // vigil namespace
 

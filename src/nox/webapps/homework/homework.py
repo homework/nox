@@ -254,14 +254,18 @@ def status(eaddr=None):
     else:
         eaddr = util.convert_to_eaddr(eaddr)
         result = "permitted" if eaddr in permitted else "denied"
-        
     return json.dumps(permitted)
+
 
 def ws_status(request, args):
     """ WS interface to status(). """
-
     eaddr = args.get("eaddr")
     return status(eaddr)
+
+def ws_dhcp_status(request, args):
+    """ Get a copy of the current assignment of ip addresses to mac addresses. """
+    data = Homework._dhcp.get_dhcp_mapping()
+    return json.dumps(data)
 
 ##
 ## main
@@ -287,8 +291,7 @@ class homework(core.Component):
         v1 = ws.get_version("1")
 
         self._dhcp = self.resolve(pydhcp_app)
-        print self._dhcp
-        print ("XXXXXXXXXXXXX %s XXXXXXXXXXXXXX"%self._dhcp.hello_world() )
+        print self._dhcp.get_dhcp_mapping()
 
 
         homeworkp = webservice.WSPathStaticString("homework")
@@ -310,6 +313,10 @@ class homework(core.Component):
         v1.register_request(ws_status, "GET", status_path, """Status of all Ethernet addresses.""")
         status_eth_path = (homeworkp, statusp, WSPathEthAddress(),)
         v1.register_request(ws_status, "GET", status_eth_path, """Status of an Ethernet address.""")
+
+        dhcpp = webservice.WSPathStaticString("dhcp_status")
+        dhcp_status_path = (homeworkp, dhcpp,)
+        v1.register_request(ws_dhcp_status, "GET", dhcp_status_path, """Status of dhcp assignments.""")
         
     def getInterface(self): return str(homework)
 
