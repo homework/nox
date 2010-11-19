@@ -134,18 +134,18 @@ def datapath_join(dpid, attrs):
     """ Event handler for controller detection of live datapath (port). """
     Homework.st['ports'][dpid] = attrs['ports'][:]
 
-    Homework.install_datapath_flow(
-        dpid,
-        { core.DL_TYPE: ethernet.ethernet.ARP_TYPE, },
-        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        Actions.flood_and_process,
-        )
-    Homework.install_datapath_flow(
-        dpid,
-        { core.DL_TYPE: ethernet.ethernet.RARP_TYPE, },
-        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        Actions.flood_and_process,
-        )
+    # Homework.install_datapath_flow(
+    #     dpid,
+    #     { core.DL_TYPE: ethernet.ethernet.ARP_TYPE, },
+    #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+    #     Actions.flood_and_process,
+    #     )
+    # Homework.install_datapath_flow(
+    #     dpid,
+    #     { core.DL_TYPE: ethernet.ethernet.RARP_TYPE, },
+    #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+    #     Actions.flood_and_process,
+    #     )
     Homework.install_datapath_flow(
         dpid,
         { core.DL_TYPE: EAPOL_TYPE, },
@@ -153,15 +153,15 @@ def datapath_join(dpid, attrs):
         Actions.flood_and_process,
         )
 
-    pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE, }
-    for eaddr, ipaddrs in Homework.st['permitted'].items():
-        pattern[core.DL_SRC] = eaddr
-        if not ipaddrs: 
-            Homework.install_datapath_flow(
-                dpid, pattern,
-                openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-                Actions.really_flood,
-                )
+    # pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE, }
+    # for eaddr, ipaddrs in Homework.st['permitted'].items():
+    #     pattern[core.DL_SRC] = eaddr
+    #     if not ipaddrs: 
+    #         Homework.install_datapath_flow(
+    #             dpid, pattern,
+    #             openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+    #             Actions.really_flood,
+    #             )
     
 def datapath_leave(dpid):
     """ Event handler for controller detection of datapath going down. """
@@ -187,11 +187,11 @@ def permit(eaddr, ipaddr=None):
 
     for dpid in Homework.st['ports']:
         ## permit the forward path to this eaddr/ipaddr
-        Homework.install_datapath_flow(
-            dpid, pattern,
-            openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-            Actions.really_flood,
-            )
+        # Homework.install_datapath_flow(
+        #     dpid, pattern,
+        #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+        #     Actions.really_flood,
+        #     )
 
         ## ...and the reverse path similarly
         del pattern[core.DL_SRC]
@@ -200,11 +200,11 @@ def permit(eaddr, ipaddr=None):
             del pattern[core.NW_SRC]
             pattern[core.NW_DST] = ipaddr
         
-        Homework.install_datapath_flow(
-            dpid, pattern,
-            openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-            Actions.really_flood,
-            )
+        # Homework.install_datapath_flow(
+        #     dpid, pattern,
+        #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+        #     Actions.really_flood,
+        #     )
 
     return status()
 
@@ -228,13 +228,13 @@ def deny(eaddr, ipaddr):
                 core.DL_SRC: eaddr,
                 }
     for dpid in Homework.st['ports']:
-        Homework.delete_strict_datapath_flow(dpid, pattern)
+        #Homework.delete_strict_datapath_flow(dpid, pattern)
         ## ...and the reverse path similarly
         del pattern[core.DL_SRC]
         pattern[core.DL_DST] = eaddr
-        Homework.delete_strict_datapath_flow(dpid, pattern)
-
-    del Homework.st['permitted'][eaddr]
+        #Homework.delete_strict_datapath_flow(dpid, pattern)
+    if eaddr in Homework.st['permitted']:
+        del Homework.st['permitted'][eaddr]
     return status()
 
 def ws_deny(request, args):
@@ -265,7 +265,7 @@ def ws_status(request, args):
 def ws_dhcp_status(request, args):
     """ Get a copy of the current assignment of ip addresses to mac addresses. """
     data = Homework._dhcp.get_dhcp_mapping()
-    return json.dumps(data)
+    return json.dumps(data)  
 
 ##
 ## main
@@ -282,7 +282,19 @@ class homework(core.Component):
         Homework.st = { 'permitted': {}, ## eaddr -> None ## [ipaddr, ...]
                         'ports': {},     ## dpid -> attrs
                         }
-        
+    
+    def permit_ether_addr(self, eaddr):
+        if not self.st:
+            print "some object is not initialized yet"
+            return False
+        else:
+            eaddr = util.convert_to_eaddr(eaddr)
+            return (eaddr in self.st['permitted'].keys())
+
+
+    def hello_world(self):
+        return "Hello World!!!"
+    
     def install(self):
         Homework.register_for_datapath_join(datapath_join)
         Homework.register_for_datapath_leave(datapath_leave)
@@ -292,6 +304,7 @@ class homework(core.Component):
 
         self._dhcp = self.resolve(pydhcp_app)
         print self._dhcp.get_dhcp_mapping()
+        self._dhcp.register_object(self)
 
 
         homeworkp = webservice.WSPathStaticString("homework")

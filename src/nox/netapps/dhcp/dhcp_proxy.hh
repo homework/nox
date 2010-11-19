@@ -5,7 +5,8 @@
 #include <vector>
 
 #include "../../coreapps/pyrt/pyglue.hh"
-#include "dhcp.hh"
+
+class dhcp;
 
 namespace vigil {
   namespace applications {
@@ -16,21 +17,17 @@ namespace vigil {
   
       void configure(PyObject*);
       void install(PyObject*);
-      std::string hello_world();
-      //void register_object(PyObject *p_obj);
-      //std::vector<dhcp_mapping> get_dhcp_mapping();
-      std::vector<std::string> get_mapping() {
-	return (std::vector<std::string>)this->p_dhcp->get_dhcp_mapping();
-      };
-
       // --
       // Proxy public interface methods here!!
       // --
-
+      std::string hello_world();
+      void register_object(PyObject *p_obj);
+      std::vector<std::string> get_mapping();
+      bool is_ether_addr_routable(ethernetaddr ether);
+      
     protected:   
-
       dhcp* p_dhcp;
-      //PyObject *p_hw;
+      PyObject *p_hw;
       container::Component* c;
     }; // class dhcp_proxy
 

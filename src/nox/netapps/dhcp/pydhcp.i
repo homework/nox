@@ -13,6 +13,7 @@ using namespace vigil;
 using namespace vigil::applications;
 %}
 
+
 %include "typemaps.i"
 %include "std_string.i"
 %include "std_vector.i"

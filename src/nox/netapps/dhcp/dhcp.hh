@@ -23,6 +23,8 @@
 #include <map>
 #include <utility>
 
+#include <net/ethernet.h>
+
 #include "component.hh"
 #include "netinet++/datapathid.hh"
 #include "config.h"
@@ -39,10 +41,36 @@
 #include "netinet++/ethernetaddr.hh"
 #include "netinet++/ipaddr.hh"
 
+#define ARPOP_REQUEST 1
+#define ARPOP_REPLY 2
+
+#define ARPHRD_ETHER 1
+
+
 namespace vigil
 {
+
+  namespace applications {
+    class dhcp_proxy;
+  };
+
   using namespace std;
   using namespace vigil::container;
+
+struct arphdr {
+  uint16_t ar_hrd;                       /* format of hardware address   */
+  uint16_t ar_pro;                       /* format of protocol address   */
+  uint8_t ar_hln;                         /* length of hardware address   */
+  uint8_t ar_pln;                         /* length of protocol address   */
+  uint16_t ar_op;                        /* ARP opcode (command)         */
+  uint8_t ar_sha[ETH_ALEN];     /* sender hardware address      */
+  uint32_t ar_sip;                       /* sender IP address            */
+  uint8_t ar_tha[ETH_ALEN];     /* target hardware address      */
+  uint32_t ar_tip;                       /* target IP address            */
+}__attribute__ ((__packed__));
+
+
+
 
   /** \brief dhcp
    * \ingroup noxcomponents
@@ -92,6 +120,16 @@ namespace vigil
      * A generic handler for packet_in events. This hopefully 
      * will mature latter to more specific functionality.
      */
+    Disposition dhcp_handler(const Event& e);
+
+
+    /**
+     * \brief dhcp packet handler
+     *
+     * A generic handler for packet_in events. This hopefully 
+     * will mature latter to more specific functionality.
+     */
+    Disposition arp_handler(const Event& e);
     Disposition packet_in_handler(const Event& e);
 
     /**
@@ -110,6 +148,7 @@ namespace vigil
     
     std::string hello_world();
     std::vector<std::string> get_dhcp_mapping(); 
+    void register_proxy(applications::dhcp_proxy  *proxy);
   private:
     size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
 			       uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 
@@ -117,6 +156,11 @@ namespace vigil
     void refresh_default_flows();
     ipaddr select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) ;
     bool check_access(const ethernetaddr& ether);
+    bool ip_matching(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
+    uint32_t find_free_ip(const ipaddr& subnet, int netmask);
+
+
+    applications::dhcp_proxy *p_dhcp_proxy;
 
     //somewhere to store the datapaths
     std::vector<datapathid*> registered_datapath;

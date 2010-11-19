@@ -12,8 +12,8 @@ endif # PY_ENABLED
 pkglib_LTLIBRARIES =\
 	dhcp.la
 
-dhcp_la_CPPFLAGS = $(AM_CPPFLAGS) -I $(top_srcdir)/src/nox -I $(top_srcdir)/src/nox/netapps/
-dhcp_la_SOURCES = dhcp.hh dhcp.cc dhcp_msg.hh # dhcp_mapping.cc 
+dhcp_la_CPPFLAGS = $(AM_CPPFLAGS) -I $(top_srcdir)/src/nox -I $(top_srcdir)/src/nox/netapps/ -I$(top_builddir)/src/nox/
+dhcp_la_SOURCES = dhcp.hh dhcp.cc dhcp_msg.hh dhcp_proxy.cc dhcp_proxy.hh # dhcp_mapping.cc 
 dhcp_la_LDFLAGS = -module -export-dynamic
 
 NOX_RUNTIMEFILES = meta.json	
@@ -25,7 +25,7 @@ pydhcp_wrap.cc pydhcp.py: pydhcp.i
 
 pkglib_LTLIBRARIES += _pydhcp.la
 _pydhcp_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(top_srcdir)/src/nox -I$(srcdir)/../ -I$(top_builddir)/src/nox/
-_pydhcp_la_SOURCES = dhcp_proxy.cc #dhcp.hh dhcp.cc # dhcp_proxy.hh  dhcp.hh dhcp.cc 
+_pydhcp_la_SOURCES = dhcp_proxy.cc dhcp_proxy.hh dhcp.hh #dhcp.cc 
 nodist__pydhcp_la_SOURCES = pydhcp_wrap.cc
 
 _pydhcp_la_LDFLAGS = -module

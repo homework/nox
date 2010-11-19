@@ -1,4 +1,5 @@
 #include "dhcp.hh"
+#include "dhcp_proxy.hh"
 
 #include <boost/bind.hpp>
 #include <boost/shared_array.hpp>
@@ -26,12 +27,16 @@
 
 #define ROUTABLE_SUBNET "10.2.0.0"
 #define ROUTABLE_NETMASK 16
-#define MAX_IP_LEN 32
 
 #define NON_ROUTABLE_SUBNET "10.3.0.0"
 #define NON_ROUTABLE_NETMASK 16
 
+#define MAX_IP_LEN 32
+
 #define FLOW_TIMEOUT_DURATION 10
+
+//TODO: this has to be defined dynamically st configuration state (check oflops. it has a similar code)
+#define HOST_DST_ETH_ADDR "\x08\x00\x27\xaf\x01\xc9"
 
 const char *dhcp_msg_type_name[] = {NULL, "DHCPDiscover", "DHCPOffer", 
 				    "DHCPRequest", "DHCPDecline", "DHCPAck", 
@@ -80,86 +85,110 @@ namespace vigil
 
   bool 
   dhcp::check_access(const ethernetaddr& ether) {
-    return true;
+    return this->p_dhcp_proxy->is_ether_addr_routable(ether);
+  }
+  
+  inline bool
+  dhcp::ip_matching(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip) {
+    return (((ntohl(ip)) & (0xFFFFFFFF<<netmask)) == ntohl(subnet));
+  }
+
+  uint32_t
+  dhcp::find_free_ip(const ipaddr& subnet, int netmask) {
+    map<struct ipaddr, struct dhcp_mapping *>::iterator iter_ip;
+    timeval tv; 
+    uint32_t inc = 4;
+    uint32_t ip = ntohl((const uint32_t)subnet);
+
+    gettimeofday(&tv, NULL);
+    for (;(ip&(0xFFFFFFFF<<netmask))==ntohl(subnet);ip += inc) {
+      if((iter_ip = this->ip_mapping.find(ipaddr(ip))) == this->ip_mapping.end())
+	break;
+    
+      //if the lease has ended for less than 30 minutes then keep the mapping just in case
+      if( tv.tv_sec - iter_ip->second->lease_end > 30*60 )
+	continue;
+      
+      //if everything above passed then we have to invalidate this mapping and keep the ip addr
+      ethernetaddr ether = iter_ip->second->mac;
+      if(iter_ip->second != NULL) delete iter_ip->second;
+      this->ip_mapping.erase(ip);
+      if(this->mac_mapping.find(ether) != this->mac_mapping.end()) {
+	this->mac_mapping.erase(ether);
+      }
+      break;
+    }
+
+    //run out of avaiiliable ip
+    if((ip&(0xFFFFFFFF<<netmask))!=ntohl(subnet)) {
+      return 0; //return zero if no availiable ip found
+    }
+    return ip;
   }
 
   ipaddr 
   dhcp::select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) {
     map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter_ether;
-    map<struct ipaddr, struct dhcp_mapping *>::iterator iter_ip;
     struct dhcp_mapping *state;
     bool is_routable;
-    uint32_t ip = 0 ;
-    uint32_t max_ip = 0;
-    uint32_t len = 0;
-    uint32_t inc = 4;
-    int i;
+    uint32_t ip = 0;
     timeval tv;
 
-    //define what is the maximum ip we can use. 
-    for( i = 0; i < (MAX_IP_LEN - len - 2); i++)
-      max_ip = (max_ip << 1) + 1;
-    //the last two bits are kept in case for the subnetting of the local network
-    max_ip = (max_ip << 2);
-    max_ip = max_ip | ip;
     
     printf("looking mac %s with dhcp msg type : %s\n", 
 	   ether.string().c_str(), dhcp_msg_type_name[dhcp_msg_type]);
     
     //firstly check if the mac address is aloud access
     is_routable = this->check_access(ether); 
+    //printf("is_routable: %s\n", (is_routable)?"True":"False");
+    
     //check now if we can find the MAC in the list 
-    if( (iter_ether = this->mac_mapping.find(ether)) != this-> mac_mapping.end()) {
+    if( ((iter_ether = this->mac_mapping.find(ether)) != this-> mac_mapping.end()) &&
+	(iter_ether->second != NULL)) {
       state = iter_ether->second;
       ip = ntohl(state->ip);
       printf("found mapping for addr %s -> %s\n", ether.string().c_str(), state->string().c_str());
+      //check if the ip is routable and if the web service agrees on that. 
+      if(!ip_matching(ipaddr((is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET)), 
+		     ((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) {
+	printf("ip assingment is invalid!\n");	
+
+	//remove old mapping
+	if(this->ip_mapping.find(state->ip) != this->ip_mapping.end())
+	  this->ip_mapping.erase(state->ip);
+	if(this->mac_mapping.find(state->mac) != this->mac_mapping.end()) 
+	  this->mac_mapping.erase(state->mac);
+	delete state;
+
+	//generate new mapping
+	ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
+			  is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
+	state = new dhcp_mapping(ipaddr(ip), ether, tv.tv_sec + (is_routable)?
+				 MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
+	//printf("inserting new entry for %s - %s\n", ether.string().c_str(), state->string().c_str());
+	this->mac_mapping[ether] = state;
+	this->ip_mapping[ipaddr(ip)] = state;
+      }
     } else {
-      //find a free ip
-      gettimeofday(&tv, NULL);
-
-      if(is_routable) {
-	ip = ntohl(inet_addr(ROUTABLE_SUBNET));
-	len = ROUTABLE_NETMASK;
-      } else {
-	ip = ntohl(inet_addr(NON_ROUTABLE_SUBNET));
-	len = NON_ROUTABLE_NETMASK;
-      }
-      for (; ip <= max_ip; ip += inc) {
-	if((iter_ip = this->ip_mapping.find(ipaddr(ip))) == this->ip_mapping.end())
-	  break;
-	
-	//if the lease has ended for less than 30 minutes then keep the mapping just in case
-	if( tv.tv_sec - iter_ip->second->lease_end > 30*60 )
-	  continue;
-	
-	//if everything above passed then we have to invalidate this mapping and keep the ip addr
-	ethernetaddr ether = iter_ip->second->mac;
-	if(iter_ip->second != NULL) delete iter_ip->second;
-	this->ip_mapping.erase(ip);
-	if(this->mac_mapping.find(ether) != this->mac_mapping.end()) {
-	  this->mac_mapping.erase(ether);
-	}
-	break;
-      }
-      
-      if(ip > max_ip) {
-	printf("wtf!!!! run out of ip's????\n");
-	exit(1);
-      }
-
       //check whether you might need to delete some old mapping on the ip map.
-      
+      ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
+			is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
+      if(!ip) {
+	printf("run out of ip's - no reply\n");
+	return STOP;
+      }
+
       //create state with new ip and send it out.
       state = new dhcp_mapping(ipaddr(ip), ether, tv.tv_sec + (is_routable)?
 			       MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
-      printf("inserting new entry for %s - %s\n", ether.string().c_str(), state->string().c_str());
+      //printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
+      //	     state->string().c_str());
       this->mac_mapping[ether] = state;
       this->ip_mapping[ipaddr(ip)] = state;
       //I need to find here the appropriate ip addr
     } 
     ip+=1;
-    printf("%lX\n", ip);
-    return ipaddr(ip);
+     return ipaddr(ip);
   }
 
   Disposition dhcp::datapath_leave_handler(const Event& e) {
@@ -176,11 +205,147 @@ namespace vigil
     return CONTINUE;
   }
 
-  Disposition dhcp::packet_in_handler(const Event& e) {
+  Disposition dhcp::arp_handler(const Event& e) {
     const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
     Flow flow(pi.in_port, *(pi.get_buffer()));
-    printf("Event received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
-	   flow.dl_type , flow.nw_proto);
+    printf("arp received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
+   	   flow.dl_type , flow.nw_proto);
+
+    uint8_t *data = pi.get_buffer()->data(), *reply = NULL;
+    int32_t data_len = pi.get_buffer()->size();
+    int pointer = 0;
+
+    pointer += sizeof( struct ether_header);
+    data_len -=  sizeof( struct ether_header);
+
+    struct arphdr *arp = (struct arphdr *)(data + pointer);
+    
+    ///sanity check of what is being requested.
+    if((ntohs(arp->ar_hrd) != ARPHRD_ETHER) || (ntohs(arp->ar_pro) != 0x0800) || 
+       (arp->ar_hln != ETH_ALEN) || (arp->ar_pln != 4)) { 
+      printf("arp packet has invalid protocol or hw address fields\n");
+      return STOP;
+    }
+    //
+    if(ntohs(arp->ar_op) != ARPOP_REQUEST) {
+      printf("Received a non arp request. Implement code to handle it!\n");
+      return STOP;
+    }
+    int len =  sizeof( struct ether_header) + sizeof(struct arphdr);
+    //allocate space for he dhcp reply
+    reply = new uint8_t[len];
+    bzero(reply, len);
+
+    //ethernet setup
+    struct ether_header *ether = (struct ether_header *) reply;
+    ether->ether_type = htons(ETHERTYPE_ARP);
+    memcpy(ether->ether_dhost, (const uint8_t *)flow.dl_src, ETH_ALEN);
+    memcpy(ether->ether_shost, HOST_DST_ETH_ADDR, ETH_ALEN);
+
+    // add here code to check if the ip requested is allowed to 
+    // be accessed by host
+    struct arphdr *arp_reply = (struct arphdr *)(reply +  sizeof( struct ether_header));
+    memcpy(arp_reply, arp, sizeof(struct arphdr));
+    
+    //change the fields that are important
+    arp_reply->ar_op = htons(ARPOP_REPLY);
+    memcpy(arp_reply->ar_tha,  HOST_DST_ETH_ADDR, ETH_ALEN);
+    arp_reply->ar_sip = arp_reply->ar_tip;  
+
+    //send reply out of the received port
+    send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
+			 OFPP_IN_PORT, pi.in_port, 1);
+    //delete reply;
+    return STOP;
+  }
+  
+  Disposition 
+  dhcp::packet_in_handler(const Event& e) {
+    const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
+    Flow flow(pi.in_port, *(pi.get_buffer()));
+    uint32_t buffer_id = pi.buffer_id;
+    ethernetaddr dl_dst;
+    printf("Pkt in received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
+   	   flow.dl_type , flow.nw_proto);
+
+    //check if src ip is routable and the src mac address is permitted.
+    if(!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) {
+      printf("MAC address is not permitted to send data\n");
+      return STOP;
+    }
+
+    //check if src ip is routable and the src mac address is permitted.
+    if(!ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, flow.nw_src) ) {
+      printf("src ip address is not routable. Better wait to get proper ip.\n");
+      return STOP;
+    }
+
+    //check if src ip is routable and we have a mac address for it.
+    if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, flow.nw_dst) || 
+       (this->ip_mapping.find(flow.nw_dst) ==  this->ip_mapping.end()) || 
+       (this->ip_mapping[flow.nw_dst] == NULL)) {
+      printf("dst ip address is not routable or we don't have mac address for it.\n");
+      return STOP;
+    }
+
+    dl_dst = this->ip_mapping[flow.nw_dst]->mac;
+
+    ofp_flow_mod* ofm;
+    size_t size = sizeof *ofm + 2*sizeof(ofp_action_dl_addr) + sizeof(ofp_action_output);
+    boost::shared_array<char> raw_of(new char[size]);
+    ofm = (ofp_flow_mod*) raw_of.get();
+    
+    ofm->header.version = OFP_VERSION;
+    ofm->header.type = OFPT_FLOW_MOD;
+    ofm->header.length = htons(size);
+    ofm->match.wildcards = htonl(0);
+    ofm->match.in_port = htons(flow.in_port);
+    ofm->match.dl_vlan = flow.dl_vlan;
+    ofm->match.dl_vlan_pcp = flow.dl_vlan_pcp;
+    memcpy(ofm->match.dl_src, flow.dl_src.octet, sizeof ofm->match.dl_src);
+    memcpy(ofm->match.dl_dst, flow.dl_dst.octet, sizeof ofm->match.dl_dst);
+    ofm->match.dl_type = flow.dl_type;
+    ofm->match.nw_src = flow.nw_src;
+    ofm->match.nw_dst = flow.nw_dst;
+    ofm->match.nw_proto = flow.nw_proto;
+    ofm->match.nw_tos = flow.nw_tos;
+    ofm->match.tp_src = flow.tp_src;
+    ofm->match.tp_dst = flow.tp_dst;
+    ofm->cookie = htonl(0);
+    ofm->command = htons(OFPFC_ADD);
+    ofm->buffer_id = htonl(buffer_id);
+    ofm->idle_timeout = htons(5);
+    ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
+    ofm->priority = htons(OFP_DEFAULT_PRIORITY);
+    ofm->flags = htons( OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP);//ofd_flow_mod_flags());
+    ofp_action_dl_addr& action_dl = *((ofp_action_dl_addr*)(ofm->actions));
+    memset(&action_dl , 0, sizeof(ofp_action_dl_addr));
+    action_dl.type = htons(OFPAT_SET_DL_SRC);
+    action_dl.len = htons(sizeof(ofp_action_dl_addr));
+    memcpy(action_dl.dl_addr, HOST_DST_ETH_ADDR, OFP_ETH_ALEN);
+    action_dl = *((ofp_action_dl_addr*)(ofm->actions) + 1);
+    memset(&action_dl , 0, sizeof(ofp_action_dl_addr));
+    action_dl.type = htons(OFPAT_SET_DL_DST);
+    action_dl.len = htons(sizeof(ofp_action_dl_addr));
+    memcpy(action_dl.dl_addr,  (const uint8_t *)dl_dst, OFP_ETH_ALEN);
+    //2*ofp_action == 1*ofp_action_dl_addr
+    ofp_action_output& action = *((ofp_action_output*)(ofm->actions + 4)); 
+    memset(&action, 0, sizeof(ofp_action_output));
+    action.type = htons(OFPAT_OUTPUT);
+    action.len = htons(sizeof(ofp_action_output));
+    action.max_len = htons(0);
+    action.port = htons(OFPP_IN_PORT);
+    send_openflow_command(pi.datapath_id, &ofm->header, true);
+    return CONTINUE;
+  }
+  
+  Disposition dhcp::dhcp_handler(const Event& e) {
+    const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
+    Flow flow(pi.in_port, *(pi.get_buffer()));
+    //printf("dhcp received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
+    //	   flow.dl_type , flow.nw_proto);
+    //printf("Event received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
+    //	   flow.dl_type , flow.nw_proto);
 
     if((flow.dl_type != 0x0008) ||             //packet is ethernet
        (flow.nw_proto != 17)               //packet is UDP
@@ -209,10 +374,6 @@ namespace vigil
     pointer += ip->ihl*4;
     data_len -= ip->ihl*4;
 
-    if(ip->protocol != 17) {
-      printf("Not UDP");
-      return CONTINUE;
-    }
     //parse udp header
     struct udphdr *udp = (struct udphdr *)(data + pointer);
     if( (ntohs(udp->dest) != 67) || (ntohs(udp->source) != 68)) {
@@ -229,6 +390,7 @@ namespace vigil
     data_len -= sizeof(struct dhcp_packet);
     pointer +=  sizeof(struct dhcp_packet);
 
+    //get the exact message type of the dhcp request
     uint8_t dhcp_msg_type = 0;
     while(data_len > 2) {
       uint8_t dhcp_option = data[pointer];
@@ -268,10 +430,38 @@ namespace vigil
 			 OFPP_IN_PORT, pi.in_port, 1);
     return STOP;
   }
+
+  void dhcp::register_proxy(applications::dhcp_proxy *_p_dhcp_proxy) {
+    this->p_dhcp_proxy = _p_dhcp_proxy;
+    //printf("got proxy: %s\n", this->p_dhcp_proxy->hello_world().c_str());
+  }
   
   void dhcp::install() {
     lg.dbg(" Install called ");
-    register_handler<Packet_in_event>(boost::bind(&dhcp::packet_in_handler, this, _1));
+    //register_handler<Packet_in_event>(boost::bind(&dhcp::packet_in_handler, this, _1));
+
+    Packet_expr expr;
+    uint32_t val = ethernet::IP;
+    expr.set_field(Packet_expr::DL_TYPE,  &val);
+    val = ip_::proto::UDP;
+    expr.set_field(Packet_expr::NW_PROTO, &val);
+    // val = 67;
+    // expr.set_field(Packet_expr::TP_DST, &val);
+    // val = 68;
+    // expr.set_field(Packet_expr::TP_SRC, &val);
+    printf("dhcp rule: %s\n", expr.to_string().c_str());
+    register_handler_on_match(1, expr,boost::bind(&dhcp::dhcp_handler, this, _1));
+    expr = Packet_expr();
+    val = ethernet::ARP;
+    expr.set_field(Packet_expr::DL_TYPE,  &val);
+    printf("arp rule: %s\n", expr.to_string().c_str());
+    register_handler_on_match(2, expr,boost::bind(&dhcp::arp_handler, this, _1));
+    expr = Packet_expr();
+    val = ethernet::IP;
+    expr.set_field(Packet_expr::DL_TYPE,  &val);
+    printf("packet in rule: %s\n", expr.to_string().c_str());
+    register_handler_on_match(10, expr,boost::bind(&dhcp::packet_in_handler, this, _1));
+ 
     register_handler<Datapath_join_event>(boost::bind(&dhcp::datapath_join_handler, this, _1));
     register_handler<Datapath_leave_event>(boost::bind(&dhcp::datapath_leave_handler, this, _1));
     timeval tv = {1,0};
