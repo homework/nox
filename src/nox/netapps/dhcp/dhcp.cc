@@ -36,11 +36,15 @@
 #define FLOW_TIMEOUT_DURATION 10
 
 //TODO: this has to be defined dynamically st configuration state (check oflops. it has a similar code)
-#define HOST_DST_ETH_ADDR "\x08\x00\x27\xaf\x01\xc9"
+#define HOST_DST_ETH_ADDR host_eth_addr 
+//"\x08\x00\x27\x45\xa4\x32" 
+//"\x08\x00\x27\xaf\x01\xc9"
 
 const char *dhcp_msg_type_name[] = {NULL, "DHCPDiscover", "DHCPOffer", 
 				    "DHCPRequest", "DHCPDecline", "DHCPAck", 
 				    "DHCPNak", "DHCPRelease", "DHCPInform"};
+
+const uint8_t host_eth_addr[] = {0x08, 0x00, 0x27, 0x45, 0xa4, 0x32};
 
 //check uhdhcp
 
@@ -99,10 +103,11 @@ namespace vigil
     timeval tv; 
     uint32_t inc = 4;
     uint32_t ip = ntohl((const uint32_t)subnet);
+    ethernetaddr ether = ethernetaddr();
 
     gettimeofday(&tv, NULL);
     for (;(ip&(0xFFFFFFFF<<netmask))==ntohl(subnet);ip += inc) {
-      if((iter_ip = this->ip_mapping.find(ipaddr(ip))) == this->ip_mapping.end())
+      if((iter_ip = this->ip_mapping.find(ipaddr(ip + 1))) == this->ip_mapping.end()) 
 	break;
     
       //if the lease has ended for less than 30 minutes then keep the mapping just in case
@@ -110,9 +115,11 @@ namespace vigil
 	continue;
       
       //if everything above passed then we have to invalidate this mapping and keep the ip addr
-      ethernetaddr ether = iter_ip->second->mac;
-      if(iter_ip->second != NULL) delete iter_ip->second;
-      this->ip_mapping.erase(ip);
+      if(iter_ip->second != NULL) {
+	ether = iter_ip->second->mac;
+	delete iter_ip->second;
+      }
+      this->ip_mapping.erase(ip + 1);
       if(this->mac_mapping.find(ether) != this->mac_mapping.end()) {
 	this->mac_mapping.erase(ether);
       }
@@ -133,10 +140,8 @@ namespace vigil
     bool is_routable;
     uint32_t ip = 0;
     timeval tv;
-
-    
-    printf("looking mac %s with dhcp msg type : %s\n", 
-	   ether.string().c_str(), dhcp_msg_type_name[dhcp_msg_type]);
+    printf("looking mac %s with dhcp msg type : (%d) %s\n", 
+	   ether.string().c_str(), dhcp_msg_type, dhcp_msg_type_name[dhcp_msg_type]);
     
     //firstly check if the mac address is aloud access
     is_routable = this->check_access(ether); 
@@ -147,7 +152,7 @@ namespace vigil
 	(iter_ether->second != NULL)) {
       state = iter_ether->second;
       ip = ntohl(state->ip);
-      printf("found mapping for addr %s -> %s\n", ether.string().c_str(), state->string().c_str());
+      //printf("found mapping for addr %s -> %s\n", ether.string().c_str(), state->string().c_str());
       //check if the ip is routable and if the web service agrees on that. 
       if(!ip_matching(ipaddr((is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET)), 
 		     ((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) {
@@ -163,6 +168,7 @@ namespace vigil
 	//generate new mapping
 	ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
 			  is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
+	ip++;
 	state = new dhcp_mapping(ipaddr(ip), ether, tv.tv_sec + (is_routable)?
 				 MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
 	//printf("inserting new entry for %s - %s\n", ether.string().c_str(), state->string().c_str());
@@ -177,6 +183,7 @@ namespace vigil
 	printf("run out of ip's - no reply\n");
 	return STOP;
       }
+      ip++;
 
       //create state with new ip and send it out.
       state = new dhcp_mapping(ipaddr(ip), ether, tv.tv_sec + (is_routable)?
@@ -187,8 +194,7 @@ namespace vigil
       this->ip_mapping[ipaddr(ip)] = state;
       //I need to find here the appropriate ip addr
     } 
-    ip+=1;
-     return ipaddr(ip);
+    return ipaddr(ip);
   }
 
   Disposition dhcp::datapath_leave_handler(const Event& e) {
@@ -209,7 +215,7 @@ namespace vigil
     const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
     Flow flow(pi.in_port, *(pi.get_buffer()));
     printf("arp received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
-   	   flow.dl_type , flow.nw_proto);
+    	   flow.dl_type , flow.nw_proto);
 
     uint8_t *data = pi.get_buffer()->data(), *reply = NULL;
     int32_t data_len = pi.get_buffer()->size();
@@ -234,7 +240,10 @@ namespace vigil
     int len =  sizeof( struct ether_header) + sizeof(struct arphdr);
     //allocate space for he dhcp reply
     reply = new uint8_t[len];
-    bzero(reply, len);
+    memset(reply, 0, len);
+
+    printf("arp reply for ip %s from %s\n", ipaddr(ntohl(arp->ar_tip)).string().c_str(), 
+	   flow.dl_src.string().c_str());
 
     //ethernet setup
     struct ether_header *ether = (struct ether_header *) reply;
@@ -249,7 +258,13 @@ namespace vigil
     
     //change the fields that are important
     arp_reply->ar_op = htons(ARPOP_REPLY);
-    memcpy(arp_reply->ar_tha,  HOST_DST_ETH_ADDR, ETH_ALEN);
+    memcpy(arp_reply->ar_tha, HOST_DST_ETH_ADDR, ETH_ALEN);
+
+    for (int i = 0 ; i < 6 ; i++) {
+      printf("%02x:", arp_reply->ar_tha[i]);
+    }
+    printf("\n");
+
     arp_reply->ar_sip = arp_reply->ar_tip;  
 
     //send reply out of the received port
@@ -265,33 +280,45 @@ namespace vigil
     Flow flow(pi.in_port, *(pi.get_buffer()));
     uint32_t buffer_id = pi.buffer_id;
     ethernetaddr dl_dst;
-    printf("Pkt in received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
-   	   flow.dl_type , flow.nw_proto);
+    printf("Pkt in received: %s(type:%x, proto:%x) %s->%s\n", pi.get_name().c_str(), 
+   	   flow.dl_type , flow.nw_proto, flow.dl_src.string().c_str(), flow.dl_dst.string().c_str());
 
     //check if src ip is routable and the src mac address is permitted.
     if(!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) {
-      printf("MAC address is not permitted to send data\n");
+      printf("MAC address %s is not permitted to send data\n", flow.dl_src.string().c_str());
       return STOP;
     }
 
     //check if src ip is routable and the src mac address is permitted.
-    if(!ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, flow.nw_src) ) {
-      printf("src ip address is not routable. Better wait to get proper ip.\n");
+    if(!ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_src))) ) {
+      printf("src ip %s is not routable. Better wait to get proper ip.\n", 
+	     ipaddr(ntohl(flow.nw_src)).string().c_str());
       return STOP;
     }
 
     //check if src ip is routable and we have a mac address for it.
-    if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, flow.nw_dst) || 
-       (this->ip_mapping.find(flow.nw_dst) ==  this->ip_mapping.end()) || 
-       (this->ip_mapping[flow.nw_dst] == NULL)) {
-      printf("dst ip address is not routable or we don't have mac address for it.\n");
+    if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_dst))) ) {
+      printf("dst ip %s is not routable.\n", 
+	     ipaddr(ntohl(flow.nw_dst)).string().c_str());
       return STOP;
     }
 
-    dl_dst = this->ip_mapping[flow.nw_dst]->mac;
+    if (this->ip_mapping.find(ipaddr(ntohl(flow.nw_dst))) ==  this->ip_mapping.end()) {
+      printf("dst ip %s is not found.\n", 
+	     ipaddr(ntohl(flow.nw_dst)).string().c_str());
+      return STOP;
+    }
+    if (this->ip_mapping[ipaddr(ntohl(flow.nw_dst))] == NULL) {
+      printf("dst ip %s is found but has no state.\n", 
+	     ipaddr(ntohl(flow.nw_dst)).string().c_str());
+      return STOP;
+    }
+
+
+    dl_dst = this->ip_mapping[ipaddr(ntohl(flow.nw_dst))]->mac;
 
     ofp_flow_mod* ofm;
-    size_t size = sizeof *ofm + 2*sizeof(ofp_action_dl_addr) + sizeof(ofp_action_output);
+    size_t size = sizeof(*ofm) + 2*sizeof(ofp_action_dl_addr) + sizeof(ofp_action_output);
     boost::shared_array<char> raw_of(new char[size]);
     ofm = (ofp_flow_mod*) raw_of.get();
     
@@ -318,16 +345,19 @@ namespace vigil
     ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
     ofm->priority = htons(OFP_DEFAULT_PRIORITY);
     ofm->flags = htons( OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP);//ofd_flow_mod_flags());
+
     ofp_action_dl_addr& action_dl = *((ofp_action_dl_addr*)(ofm->actions));
     memset(&action_dl , 0, sizeof(ofp_action_dl_addr));
     action_dl.type = htons(OFPAT_SET_DL_SRC);
     action_dl.len = htons(sizeof(ofp_action_dl_addr));
     memcpy(action_dl.dl_addr, HOST_DST_ETH_ADDR, OFP_ETH_ALEN);
-    action_dl = *((ofp_action_dl_addr*)(ofm->actions) + 1);
-    memset(&action_dl , 0, sizeof(ofp_action_dl_addr));
-    action_dl.type = htons(OFPAT_SET_DL_DST);
-    action_dl.len = htons(sizeof(ofp_action_dl_addr));
-    memcpy(action_dl.dl_addr,  (const uint8_t *)dl_dst, OFP_ETH_ALEN);
+
+    ofp_action_dl_addr& action_dl_dst = *((ofp_action_dl_addr*)(ofm->actions)+1);
+    memset(&action_dl_dst , 0, sizeof(ofp_action_dl_addr));
+    action_dl_dst.type = htons(OFPAT_SET_DL_DST);
+    action_dl_dst.len = htons(sizeof(ofp_action_dl_addr));
+    memcpy(action_dl_dst.dl_addr,  (const uint8_t *)dl_dst, OFP_ETH_ALEN);
+
     //2*ofp_action == 1*ofp_action_dl_addr
     ofp_action_output& action = *((ofp_action_output*)(ofm->actions + 4)); 
     memset(&action, 0, sizeof(ofp_action_output));
@@ -419,13 +449,13 @@ namespace vigil
     //uint32_t send_ip = htonl(inet_addr("10.1.1.1"));
 
     ipaddr send_ip = this->select_ip(ethernetaddr(ether->ether_shost), dhcp_msg_type);
-    printf("send_ip : %s\n", send_ip.string().c_str());
 
     uint8_t reply_msg_type = (dhcp_msg_type == DHCPDISCOVER? 
 			      DHCPOFFER:DHCPACK);
 
     size_t len = generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, 
 				     ntohl((uint32_t)send_ip), reply_msg_type);
+
     send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
 			 OFPP_IN_PORT, pi.in_port, 1);
     return STOP;

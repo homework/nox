@@ -66,8 +66,8 @@ namespace vigil {
 					     ether.string().c_str());
       if(py_ret != NULL) {
 	ret = PyInt_AsLong(py_ret);
-	//printf("permit_ether_addr returned: %d %s\n", PyInt_AsLong(py_ret),
-	//       ret?"Allowed":"Not Allowed");
+	// printf("permit_ether_addr %s returned: %d %s\n", ether.string().c_str(),PyInt_AsLong(py_ret),
+	//        ret?"Allowed":"Not Allowed");
 	Py_DECREF(py_ret);
       } else {        
 	PyErr_Print();	
