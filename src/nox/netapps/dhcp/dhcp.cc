@@ -22,6 +22,8 @@
 #include "netinet++/ipaddr.hh"
 #include "dhcp_mapping.hh"
 
+#include "local_addr.hh"
+
 #define MAX_ROUTABLE_LEASE_DURATION 30
 #define MAX_NON_ROUTABLE_LEASE_DURATION 30
 
@@ -36,15 +38,15 @@
 #define FLOW_TIMEOUT_DURATION 10
 
 //TODO: this has to be defined dynamically st configuration state (check oflops. it has a similar code)
-#define HOST_DST_ETH_ADDR host_eth_addr 
+//#define HOST_DST_ETH_ADDR host_eth_addr 
 //"\x08\x00\x27\x45\xa4\x32" 
 //"\x08\x00\x27\xaf\x01\xc9"
+//const uint8_t host_eth_addr[] = {0x08, 0x00, 0x27, 0xaf, 0x01, 0xc9};
 
 const char *dhcp_msg_type_name[] = {NULL, "DHCPDiscover", "DHCPOffer", 
 				    "DHCPRequest", "DHCPDecline", "DHCPAck", 
 				    "DHCPNak", "DHCPRelease", "DHCPInform"};
 
-const uint8_t host_eth_addr[] = {0x08, 0x00, 0x27, 0x45, 0xa4, 0x32};
 
 //check uhdhcp
 
@@ -221,13 +223,16 @@ namespace vigil
     int32_t data_len = pi.get_buffer()->size();
     int pointer = 0;
 
+    //check if sender is a routable ip. Otherwise
+
     pointer += sizeof( struct ether_header);
     data_len -=  sizeof( struct ether_header);
 
     struct arphdr *arp = (struct arphdr *)(data + pointer);
     
     ///sanity check of what is being requested.
-    if((ntohs(arp->ar_hrd) != ARPHRD_ETHER) || (ntohs(arp->ar_pro) != 0x0800) || 
+    if((ntohs(arp->ar_hrd) != ARPHRD_ETHER) || 
+       (ntohs(arp->ar_pro) != 0x0800) || 
        (arp->ar_hln != ETH_ALEN) || (arp->ar_pln != 4)) { 
       printf("arp packet has invalid protocol or hw address fields\n");
       return STOP;
@@ -242,7 +247,8 @@ namespace vigil
     reply = new uint8_t[len];
     memset(reply, 0, len);
 
-    printf("arp reply for ip %s from %s\n", ipaddr(ntohl(arp->ar_tip)).string().c_str(), 
+    printf("arp reply for ip %s from %s\n", 
+	   ipaddr(ntohl(arp->ar_tip)).string().c_str(), 
 	   flow.dl_src.string().c_str());
 
     //ethernet setup
@@ -258,14 +264,17 @@ namespace vigil
     
     //change the fields that are important
     arp_reply->ar_op = htons(ARPOP_REPLY);
-    memcpy(arp_reply->ar_tha, HOST_DST_ETH_ADDR, ETH_ALEN);
+    memcpy(arp_reply->ar_tha, arp_reply->ar_sha, ETH_ALEN);
+    memcpy(arp_reply->ar_sha, HOST_DST_ETH_ADDR, ETH_ALEN);
 
     for (int i = 0 ; i < 6 ; i++) {
       printf("%02x:", arp_reply->ar_tha[i]);
     }
     printf("\n");
 
-    arp_reply->ar_sip = arp_reply->ar_tip;  
+    uint32_t tmp = arp_reply->ar_sip; 
+    arp_reply->ar_sip = arp_reply->ar_tip;
+    arp_reply->ar_tip = tmp;
 
     //send reply out of the received port
     send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
