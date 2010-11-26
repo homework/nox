@@ -2,12 +2,7 @@
 #include "dhcp_proxy.hh"
 
 #include <map>
-#include <utility>
-#include <linux/netlink.h>     
-#include <sys/types.h>          /* See NOTES */
-#include <sys/socket.h>      
-#include <netlink/netlink.h>
-#include <netlink/route/link.h>
+#include <utility>      
 #include <net/ethernet.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
@@ -64,6 +59,10 @@ namespace vigil
 {
   static Vlog_module lg("dhcp");
 
+
+  /////////////////////////////////////
+  //   module configuration 
+  /////////////////////////////////////
   void dhcp::configure(const Configuration* c) {
     struct nl_cache *cache;
 
@@ -74,7 +73,7 @@ namespace vigil
       perror("socket alloc");
       exit(1);
     }
-    if(nl_connect(sk, 0 /*NETLINK_ROUTE*/ ) != 0) {
+    if(nl_connect(sk, NETLINK_ROUTE) != 0) {
       perror("nl connect");
       exit(1);
     }
@@ -92,6 +91,51 @@ namespace vigil
     printf("Retrieving ix %d for intf %s\n", this->ifindex, BRIDGE_INTERFACE_NAME);
   }
 
+
+  
+  void dhcp::install() {
+    lg.dbg(" Install called ");
+    //register_handler<Packet_in_event>(boost::bind(&dhcp::packet_in_handler, this, _1));
+
+    Packet_expr expr;
+    uint32_t val = ethernet::IP;
+    expr.set_field(Packet_expr::DL_TYPE,  &val);
+    val = ip_::proto::UDP;
+    expr.set_field(Packet_expr::NW_PROTO, &val);
+    // val = 67;
+    // expr.set_field(Packet_expr::TP_DST, &val);
+    // val = 68;
+    // expr.set_field(Packet_expr::TP_SRC, &val);
+    printf("dhcp rule: %s\n", expr.to_string().c_str());
+    register_handler_on_match(1, expr,boost::bind(&dhcp::dhcp_handler, this, _1));
+    expr = Packet_expr();
+    val = ethernet::ARP;
+    expr.set_field(Packet_expr::DL_TYPE,  &val);
+    printf("arp rule: %s\n", expr.to_string().c_str());
+    register_handler_on_match(2, expr,boost::bind(&dhcp::arp_handler, this, _1));
+    expr = Packet_expr();
+    val = ethernet::IP;
+    expr.set_field(Packet_expr::DL_TYPE,  &val);
+    printf("packet in rule: %s\n", expr.to_string().c_str());
+    register_handler_on_match(10, expr,boost::bind(&dhcp::packet_in_handler, this, _1));
+ 
+    register_handler<Datapath_join_event>(boost::bind(&dhcp::datapath_join_handler, this, _1));
+    register_handler<Datapath_leave_event>(boost::bind(&dhcp::datapath_leave_handler, this, _1));
+    timeval tv = {1,0};
+    post(boost::bind(&dhcp::refresh_default_flows, this), tv);
+  }
+
+  void 
+  dhcp::getInstance(const Context* c,
+			 dhcp*& component) {
+    component = dynamic_cast<dhcp*>
+      (c->get_by_interface(container::Interface_description
+			   (typeid(dhcp).name())));
+  }
+
+  //////////////////////////////////////////////////
+  //     Timer event handling
+  //////////////////////////////////////////////////
   void 
   dhcp::refresh_default_flows() {
     std::vector<datapathid *>::iterator it;
@@ -103,10 +147,13 @@ namespace vigil
       generate_openflow_dhcp_flow(ofm, size);
       send_openflow_command(**it, &ofm->header, true);
     }
-    timeval tv = {FLOW_TIMEOUT_DURATION,0};
-    post(boost::bind(&dhcp::refresh_default_flows, this), tv);
+    //timeval tv = {FLOW_TIMEOUT_DURATION,0};
+    //post(boost::bind(&dhcp::refresh_default_flows, this), tv);
   }
 
+  /////////////////////////////////////
+  //   Datapath event handling
+  /////////////////////////////////////
   Disposition dhcp::datapath_join_handler(const Event& e) {
     const Datapath_join_event& pi = assert_cast<const Datapath_join_event&>(e);
     printf("joining switch with datapath id : %s\n", pi.datapath_id.string().c_str());
@@ -119,116 +166,6 @@ namespace vigil
     generate_openflow_dhcp_flow(ofm, size);
     send_openflow_command(pi.datapath_id, &ofm->header, true);
     return CONTINUE;
-  }
-
-  bool 
-  dhcp::check_access(const ethernetaddr& ether) {
-    return this->p_dhcp_proxy->is_ether_addr_routable(ether);
-  }
-  
-  inline bool
-  dhcp::ip_matching(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip) {
-    return (((ntohl(ip)) & (0xFFFFFFFF<<netmask)) == ntohl(subnet));
-  }
-
-  uint32_t
-  dhcp::find_free_ip(const ipaddr& subnet, int netmask) {
-    map<struct ipaddr, struct dhcp_mapping *>::iterator iter_ip;
-    timeval tv; 
-    uint32_t inc = 4;
-    uint32_t ip = ntohl((const uint32_t)subnet);
-    ethernetaddr ether = ethernetaddr();
-
-    gettimeofday(&tv, NULL);
-    for (;(ip&(0xFFFFFFFF<<netmask))==ntohl(subnet);ip += inc) {
-      if((iter_ip = this->ip_mapping.find(ipaddr(ip + 1))) == this->ip_mapping.end()) 
-	break;
-    
-      //if the lease has ended for less than 30 minutes then keep the mapping just in case
-      if( tv.tv_sec - iter_ip->second->lease_end > 30*60 )
-	continue;
-      
-      //if everything above passed then we have to invalidate this mapping and keep the ip addr
-      if(iter_ip->second != NULL) {
-	ether = iter_ip->second->mac;
-	delete iter_ip->second;
-      }
-      this->ip_mapping.erase(ip + 1);
-      if(this->mac_mapping.find(ether) != this->mac_mapping.end()) {
-	this->mac_mapping.erase(ether);
-      }
-      break;
-    }
-
-    //run out of avaiiliable ip
-    if((ip&(0xFFFFFFFF<<netmask))!=ntohl(subnet)) {
-      return 0; //return zero if no availiable ip found
-    }
-    return ip;
-  }
-
-  ipaddr 
-  dhcp::select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) {
-    map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter_ether;
-    struct dhcp_mapping *state;
-    bool is_routable;
-    uint32_t ip = 0;
-    timeval tv;
-    printf("looking mac %s with dhcp msg type : (%d) %s\n", 
-	   ether.string().c_str(), dhcp_msg_type, dhcp_msg_type_name[dhcp_msg_type]);
-    
-    //firstly check if the mac address is aloud access
-    is_routable = this->check_access(ether); 
-    //printf("is_routable: %s\n", (is_routable)?"True":"False");
-    
-    //check now if we can find the MAC in the list 
-    if( ((iter_ether = this->mac_mapping.find(ether)) != this-> mac_mapping.end()) &&
-	(iter_ether->second != NULL)) {
-      state = iter_ether->second;
-      ip = ntohl(state->ip);
-      //printf("found mapping for addr %s -> %s\n", ether.string().c_str(), state->string().c_str());
-      //check if the ip is routable and if the web service agrees on that. 
-      if(!ip_matching(ipaddr((is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET)), 
-		     ((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) {
-	printf("ip assingment is invalid!\n");	
-
-	//remove old mapping
-	if(this->ip_mapping.find(state->ip) != this->ip_mapping.end())
-	  this->ip_mapping.erase(state->ip);
-	if(this->mac_mapping.find(state->mac) != this->mac_mapping.end()) 
-	  this->mac_mapping.erase(state->mac);
-	delete state;
-
-	//generate new mapping
-	ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
-			  is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
-	ip++;
-	state = new dhcp_mapping(ipaddr(ip), ether, tv.tv_sec + (is_routable)?
-				 MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
-	//printf("inserting new entry for %s - %s\n", ether.string().c_str(), state->string().c_str());
-	this->mac_mapping[ether] = state;
-	this->ip_mapping[ipaddr(ip)] = state;
-      }
-    } else {
-      //check whether you might need to delete some old mapping on the ip map.
-      ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
-			is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
-      if(!ip) {
-	printf("run out of ip's - no reply\n");
-	return STOP;
-      }
-      ip++;
-
-      //create state with new ip and send it out.
-      state = new dhcp_mapping(ipaddr(ip), ether, tv.tv_sec + (is_routable)?
-			       MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
-      //printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
-      //	     state->string().c_str());
-      this->mac_mapping[ether] = state;
-      this->ip_mapping[ipaddr(ip)] = state;
-      //I need to find here the appropriate ip addr
-    } 
-    return ipaddr(ip);
   }
 
   Disposition dhcp::datapath_leave_handler(const Event& e) {
@@ -245,17 +182,56 @@ namespace vigil
     return CONTINUE;
   }
 
+  /////////////////////////////////////
+  //   PktIn event handling
+  /////////////////////////////////////
   Disposition dhcp::arp_handler(const Event& e) {
+    // chrck for better handling ioctrl and SIOCSARP
+    // it will allow to insert mac entries programmatically
+    // so that you can always control what is going on in the net.
     const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
     Flow flow(pi.in_port, *(pi.get_buffer()));
     printf("arp received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
     	   flow.dl_type , flow.nw_proto);
+    uint32_t buffer_id = pi.buffer_id;
+
+    ofp_flow_mod* ofm;
+    size_t size = sizeof(*ofm) + 2*sizeof(ofp_action_output);
+    boost::shared_array<char> raw_of(new char[size]);
+    ofm = (ofp_flow_mod*) raw_of.get();
+    ofm->header.version = OFP_VERSION;
+    ofm->header.type = OFPT_FLOW_MOD;
+    ofm->header.length = htons(size);
+    ofm->match.wildcards =htonl(~OFPFW_DL_TYPE);
+    ofm->match.in_port = htons(flow.in_port);
+    ofm->match.dl_type = ethernet::ARP; //flow.dl_type;
+    ofm->cookie = htonl(0);
+    ofm->command = htons(OFPFC_ADD);
+    ofm->buffer_id = htonl(buffer_id);
+    ofm->idle_timeout = htons(OFP_FLOW_PERMANENT);
+    ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
+    ofm->priority = htons(OFP_DEFAULT_PRIORITY);
+    ofm->flags = htons( OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP);
+    ofp_action_output& action_local = *((ofp_action_output*)(ofm->actions)); 
+    memset(&action_local, 0, sizeof(ofp_action_output));
+    action_local.type = htons(OFPAT_OUTPUT);
+    action_local.len = htons(sizeof(ofp_action_output));
+    action_local.port = 0; 
+    action_local.max_len = htons(2000);
+    ofp_action_output& action_remote = *((ofp_action_output*)(ofm->actions) + 1); 
+    memset(&action_remote, 0, sizeof(ofp_action_output));
+    action_remote.type = htons(OFPAT_OUTPUT);
+    action_remote.len = htons(sizeof(ofp_action_output));
+    action_remote.port = htons(1); 
+    action_remote.max_len = htons(2000);
+
+    send_openflow_command(pi.datapath_id, &ofm->header, true);
+    return STOP;
+    //check if sender is a routable ip. Otherwise
 
     uint8_t *data = pi.get_buffer()->data(), *reply = NULL;
     int32_t data_len = pi.get_buffer()->size();
     int pointer = 0;
-
-    //check if sender is a routable ip. Otherwise
 
     pointer += sizeof( struct ether_header);
     data_len -=  sizeof( struct ether_header);
@@ -321,11 +297,14 @@ namespace vigil
     Flow flow(pi.in_port, *(pi.get_buffer()));
     uint32_t buffer_id = pi.buffer_id;
     ethernetaddr dl_dst;
+    bool is_dst_router = (ntohl(flow.nw_dst) == ntohl(flow.nw_src) + 1);
+    bool is_src_router = (ntohs(flow.in_port) != OFPP_LOCAL);
     printf("Pkt in received: %s(type:%x, proto:%x) %s->%s\n", pi.get_name().c_str(), 
    	   flow.dl_type , flow.nw_proto, flow.dl_src.string().c_str(), flow.dl_dst.string().c_str());
 
     //check if src ip is routable and the src mac address is permitted.
-    if(!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) {
+    if( (!is_src_router) && 
+       (!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) ) {
       printf("MAC address %s is not permitted to send data\n", flow.dl_src.string().c_str());
       return STOP;
     }
@@ -337,32 +316,33 @@ namespace vigil
       return STOP;
     }
 
-    //check if src ip is routable and we have a mac address for it.
-    if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_dst))) ) {
+    //check if dst ip is routable and we have a mac address for it.
+    if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, 
+		   ipaddr(ntohl(flow.nw_dst))) ) {
       printf("dst ip %s is not routable.\n", 
 	     ipaddr(ntohl(flow.nw_dst)).string().c_str());
       return STOP;
     }
 
-    if (this->ip_mapping.find(ipaddr(ntohl(flow.nw_dst))) ==  this->ip_mapping.end()) {
-      printf("dst ip %s is not found.\n", 
-	     ipaddr(ntohl(flow.nw_dst)).string().c_str());
+    if ( (!is_dst_router) && 
+	(this->ip_mapping.find(ipaddr(ntohl(flow.nw_dst))) ==  this->ip_mapping.end())) {
+      printf("dst ip %s is not found.\n", ipaddr(ntohl(flow.nw_dst)).string().c_str());
       return STOP;
     }
-    if (this->ip_mapping[ipaddr(ntohl(flow.nw_dst))] == NULL) {
+    if ((!is_dst_router) && (this->ip_mapping[ipaddr(ntohl(flow.nw_dst))] == NULL)) {
       printf("dst ip %s is found but has no state.\n", 
 	     ipaddr(ntohl(flow.nw_dst)).string().c_str());
       return STOP;
+    } else if ((!is_dst_router) && (this->ip_mapping[ipaddr(ntohl(flow.nw_dst))] != NULL)){
+      dl_dst = this->ip_mapping[ipaddr(ntohl(flow.nw_dst))]->mac;
     }
 
-
-    dl_dst = this->ip_mapping[ipaddr(ntohl(flow.nw_dst))]->mac;
-
     ofp_flow_mod* ofm;
-    size_t size = sizeof(*ofm) + 2*sizeof(ofp_action_dl_addr) + sizeof(ofp_action_output);
+    size_t size = sizeof(*ofm) 
+      + ((is_dst_router | is_src_router)?0:2*sizeof(ofp_action_dl_addr)) 
+      + sizeof(ofp_action_output);
     boost::shared_array<char> raw_of(new char[size]);
     ofm = (ofp_flow_mod*) raw_of.get();
-    
     ofm->header.version = OFP_VERSION;
     ofm->header.type = OFPT_FLOW_MOD;
     ofm->header.length = htons(size);
@@ -385,27 +365,36 @@ namespace vigil
     ofm->idle_timeout = htons(5);
     ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
     ofm->priority = htons(OFP_DEFAULT_PRIORITY);
-    ofm->flags = htons( OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP);//ofd_flow_mod_flags());
+    ofm->flags = htons( OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP);
+    if(!is_src_router && !is_dst_router) {
+      ofp_action_dl_addr& action_dl = *((ofp_action_dl_addr*)(ofm->actions));
+      memset(&action_dl , 0, sizeof(ofp_action_dl_addr));
+      action_dl.type = htons(OFPAT_SET_DL_SRC);
+      action_dl.len = htons(sizeof(ofp_action_dl_addr));
+      memcpy(action_dl.dl_addr, HOST_DST_ETH_ADDR, OFP_ETH_ALEN);
+      ofp_action_dl_addr& action_dl_dst = *((ofp_action_dl_addr*)(ofm->actions)+1);
+      memset(&action_dl_dst , 0, sizeof(ofp_action_dl_addr));
+      action_dl_dst.type = htons(OFPAT_SET_DL_DST);
+      action_dl_dst.len = htons(sizeof(ofp_action_dl_addr));
+      memcpy(action_dl_dst.dl_addr,  (const uint8_t *)dl_dst, OFP_ETH_ALEN);
+      //2*ofp_action == 1*ofp_action_dl_addr
+      ofp_action_output& action = *((ofp_action_output*)(ofm->actions + 4)); 
+      memset(&action, 0, sizeof(ofp_action_output));
+      action.type = htons(OFPAT_OUTPUT);
+      action.len = htons(sizeof(ofp_action_output));
+      action.max_len = htons(2000);
+      action.port = htons(OFPP_IN_PORT); 
+    } else {
+      ofp_action_output& action = *((ofp_action_output*)(ofm->actions)); 
+      memset(&action, 0, sizeof(ofp_action_output));
+      action.type = htons(OFPAT_OUTPUT);
+      action.len = htons(sizeof(ofp_action_output));
+      action.max_len = htons(2000);
 
-    ofp_action_dl_addr& action_dl = *((ofp_action_dl_addr*)(ofm->actions));
-    memset(&action_dl , 0, sizeof(ofp_action_dl_addr));
-    action_dl.type = htons(OFPAT_SET_DL_SRC);
-    action_dl.len = htons(sizeof(ofp_action_dl_addr));
-    memcpy(action_dl.dl_addr, HOST_DST_ETH_ADDR, OFP_ETH_ALEN);
-
-    ofp_action_dl_addr& action_dl_dst = *((ofp_action_dl_addr*)(ofm->actions)+1);
-    memset(&action_dl_dst , 0, sizeof(ofp_action_dl_addr));
-    action_dl_dst.type = htons(OFPAT_SET_DL_DST);
-    action_dl_dst.len = htons(sizeof(ofp_action_dl_addr));
-    memcpy(action_dl_dst.dl_addr,  (const uint8_t *)dl_dst, OFP_ETH_ALEN);
-
-    //2*ofp_action == 1*ofp_action_dl_addr
-    ofp_action_output& action = *((ofp_action_output*)(ofm->actions + 4)); 
-    memset(&action, 0, sizeof(ofp_action_output));
-    action.type = htons(OFPAT_OUTPUT);
-    action.len = htons(sizeof(ofp_action_output));
-    action.max_len = htons(0);
-    action.port = htons(OFPP_IN_PORT);
+      //TODO: this has to be controlled locally. Map on each dhcp request
+      //on which port I found an ip
+      action.port = (is_dst_router)?htons(0):htons(1); 
+    }
     send_openflow_command(pi.datapath_id, &ofm->header, true);
     return CONTINUE;
   }
@@ -415,14 +404,12 @@ namespace vigil
     Flow flow(pi.in_port, *(pi.get_buffer()));
     //printf("dhcp received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
     //	   flow.dl_type , flow.nw_proto);
-    //printf("Event received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
-    //	   flow.dl_type , flow.nw_proto);
 
-    if((flow.dl_type != 0x0008) ||             //packet is ethernet
-       (flow.nw_proto != 17)               //packet is UDP
-       ) {                 
-      return CONTINUE;
-    } 
+    // if((flow.dl_type != 0x0008) ||             //packet is ethernet
+    //    (flow.nw_proto != 17)               //packet is UDP
+    //    ) {                 
+    //   return CONTINUE;
+    // } 
     
     uint8_t *data = pi.get_buffer()->data(), *reply = NULL;
     int32_t data_len = pi.get_buffer()->size();
@@ -466,9 +453,9 @@ namespace vigil
     while(data_len > 2) {
       uint8_t dhcp_option = data[pointer];
       uint8_t dhcp_option_len = data[pointer+1];
-      //printf("pointer:%d, cookie:%llx, option %02x, len:%02x, option %02x, len:%02x\n", pointer,  
-      //	     (long long unsigned int)dhcp->cookie, data[pointer], data[pointer+1],  dhcp_option,  
-      //	     dhcp_option_len);
+      //printf("pointer:%d, cookie:%llx, option %02x, len:%02x, option %02x, len:%02x\n", 
+      //pointer,(long long unsigned int)dhcp->cookie, data[pointer], data[pointer+1], 
+      // dhcp_option, dhcp_option_len);
       
       if(dhcp_option == 53) {
 	dhcp_msg_type = data[pointer + 2];
@@ -491,6 +478,13 @@ namespace vigil
 
     ipaddr send_ip = this->select_ip(ethernetaddr(ether->ether_shost), dhcp_msg_type);
 
+    //TODO: if ip is routable, add ip to the interface
+    if(this->ip_matching(ipaddr(ROUTABLE_SUBNET),ROUTABLE_NETMASK, ntohl((uint32_t)send_ip))) {
+      this->add_addr(ntohl((uint32_t)send_ip) + 1);
+    } else {
+      printf("ip %s is not routable\n", send_ip.string().c_str());
+    }
+
     uint8_t reply_msg_type = (dhcp_msg_type == DHCPDISCOVER? 
 			      DHCPOFFER:DHCPACK);
 
@@ -501,51 +495,200 @@ namespace vigil
 			 OFPP_IN_PORT, pi.in_port, 1);
     return STOP;
   }
+  
+  //////////////////////////////////////////
+  // Mapping manipulation functions
+  /////////////////////////////////////////
+  inline bool
+  dhcp::ip_matching(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip) {
+    return (((ntohl(ip)) & (0xFFFFFFFF<<netmask)) == ntohl(subnet));
+  }
 
+  uint32_t
+  dhcp::find_free_ip(const ipaddr& subnet, int netmask) {
+    map<struct ipaddr, struct dhcp_mapping *>::iterator iter_ip;
+    timeval tv; 
+    uint32_t inc = 4;
+    uint32_t ip = ntohl((const uint32_t)subnet);
+    ethernetaddr ether = ethernetaddr();
+
+    gettimeofday(&tv, NULL);
+    for (;(ip&(0xFFFFFFFF<<netmask))==ntohl(subnet);ip += inc) {
+      if((iter_ip = this->ip_mapping.find(ipaddr(ip + 1))) == this->ip_mapping.end()) 
+	break;
+    
+      //if the lease has ended for less than 30 minutes then keep the mapping just in case
+      if( tv.tv_sec - iter_ip->second->lease_end > 30*60 )
+	continue;
+      
+      //if everything above passed then we have to invalidate this mapping and keep the ip addr
+      if(iter_ip->second != NULL) {
+	ether = iter_ip->second->mac;
+	delete iter_ip->second;
+      }
+      this->ip_mapping.erase(ip + 1);
+      if(this->mac_mapping.find(ether) != this->mac_mapping.end()) {
+	this->mac_mapping.erase(ether);
+      }
+      break;
+    }
+
+    //run out of avaiiliable ip
+    if((ip&(0xFFFFFFFF<<netmask))!=ntohl(subnet)) {
+      return 0; //return zero if no availiable ip found
+    }
+    return ip;
+  }
+
+  ipaddr 
+  dhcp::select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) {
+    map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter_ether;
+    struct dhcp_mapping *state;
+    bool is_routable;
+    uint32_t ip = 0;
+    timeval tv;
+    printf("looking mac %s with dhcp msg type : (%d) %s\n", 
+	   ether.string().c_str(), dhcp_msg_type, dhcp_msg_type_name[dhcp_msg_type]);
+    
+    //firstly check if the mac address is aloud access
+    is_routable = this->check_access(ether); 
+    //printf("is_routable: %s\n", (is_routable)?"True":"False");
+    
+    //check now if we can find the MAC in the list 
+    if( ((iter_ether = this->mac_mapping.find(ether)) != this-> mac_mapping.end()) &&
+	(iter_ether->second != NULL)) {
+      state = iter_ether->second;
+      ip = ntohl(state->ip);
+      //printf("found mapping for addr %s -> %s\n", ether.string().c_str(), 
+      //state->string().c_str());
+      //check if the ip is routable and if the web service agrees on that. 
+      if(!ip_matching(ipaddr((is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET)), 
+		     ((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) {
+	printf("ip assingment is invalid!\n");	
+
+	//remove old mapping
+	if(this->ip_mapping.find(state->ip) != this->ip_mapping.end())
+	  this->ip_mapping.erase(state->ip);
+	if(this->mac_mapping.find(state->mac) != this->mac_mapping.end()) 
+	  this->mac_mapping.erase(state->mac);
+	delete state;
+
+	//generate new mapping
+	ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
+			  is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
+	ip++;
+	state = new dhcp_mapping(ipaddr(ip), ether, tv.tv_sec + (is_routable)?
+				 MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
+	//printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
+	//state->string().c_str());
+	this->mac_mapping[ether] = state;
+	this->ip_mapping[ipaddr(ip)] = state;
+      }
+    } else {
+      //check whether you might need to delete some old mapping on the ip map.
+      ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
+			is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
+      if(!ip) {
+	printf("run out of ip's - no reply\n");
+	return STOP;
+      }
+      ip++;
+
+      //create state with new ip and send it out.
+      state = new dhcp_mapping(ipaddr(ip), ether, tv.tv_sec + (is_routable)?
+			       MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
+      //printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
+      //	     state->string().c_str());
+      this->mac_mapping[ether] = state;
+      this->ip_mapping[ipaddr(ip)] = state;
+      //I need to find here the appropriate ip addr
+    } 
+    return ipaddr(ip);
+  }
+
+  //////////////////////////////////
+  //  Homework interaction 
+  /////////////////////////////////
   void dhcp::register_proxy(applications::dhcp_proxy *_p_dhcp_proxy) {
     this->p_dhcp_proxy = _p_dhcp_proxy;
     //printf("got proxy: %s\n", this->p_dhcp_proxy->hello_world().c_str());
-  }
-  
-  void dhcp::install() {
-    lg.dbg(" Install called ");
-    //register_handler<Packet_in_event>(boost::bind(&dhcp::packet_in_handler, this, _1));
+  }  
 
-    Packet_expr expr;
-    uint32_t val = ethernet::IP;
-    expr.set_field(Packet_expr::DL_TYPE,  &val);
-    val = ip_::proto::UDP;
-    expr.set_field(Packet_expr::NW_PROTO, &val);
-    // val = 67;
-    // expr.set_field(Packet_expr::TP_DST, &val);
-    // val = 68;
-    // expr.set_field(Packet_expr::TP_SRC, &val);
-    printf("dhcp rule: %s\n", expr.to_string().c_str());
-    register_handler_on_match(1, expr,boost::bind(&dhcp::dhcp_handler, this, _1));
-    expr = Packet_expr();
-    val = ethernet::ARP;
-    expr.set_field(Packet_expr::DL_TYPE,  &val);
-    printf("arp rule: %s\n", expr.to_string().c_str());
-    register_handler_on_match(2, expr,boost::bind(&dhcp::arp_handler, this, _1));
-    expr = Packet_expr();
-    val = ethernet::IP;
-    expr.set_field(Packet_expr::DL_TYPE,  &val);
-    printf("packet in rule: %s\n", expr.to_string().c_str());
-    register_handler_on_match(10, expr,boost::bind(&dhcp::packet_in_handler, this, _1));
- 
-    register_handler<Datapath_join_event>(boost::bind(&dhcp::datapath_join_handler, this, _1));
-    register_handler<Datapath_leave_event>(boost::bind(&dhcp::datapath_leave_handler, this, _1));
-    timeval tv = {1,0};
-    post(boost::bind(&dhcp::refresh_default_flows, this), tv);
+  std::string
+  dhcp::hello_world() {
+    return string("Hello World!!!");
   }
-  
-  void 
-  dhcp::getInstance(const Context* c,
-			 dhcp*& component) {
-    component = dynamic_cast<dhcp*>
-      (c->get_by_interface(container::Interface_description
-			   (typeid(dhcp).name())));
+
+  std::vector<std::string> 
+  dhcp::get_dhcp_mapping() { 
+    std::map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter = 
+      this->mac_mapping.begin();
+    std::vector<std::string> v;
+    for (; iter != this->mac_mapping.end(); iter++) {
+      if(iter->second == NULL) continue;
+      v.push_back(iter->second->string()); 
+    }
+    return v;
+  };
+
+  bool 
+  dhcp::check_access(const ethernetaddr& ether) {
+    return this->p_dhcp_proxy->is_ether_addr_routable(ether);
   }
+
+  /////////////////////////////////////////////
+  //   Netlink interaction methods
+  ////////////////////////////////////////////
+  bool 
+  dhcp::add_addr(uint32_t ip) {
+    struct rtnl_addr *addr;
+    struct nl_addr *local_addr;
+    
+    // Allocate an empty address object to be filled out with the attributes
+    // of the new address.
+    addr = rtnl_addr_alloc();
+    if(addr == NULL) {
+      perror("addr alloc");
+      return 1;
+    }
+
+    // Fill out the mandatory attributes of the new address. Setting the
+    // local address will automatically set the address family and the
+    // prefix length to the correct values.
+    rtnl_addr_set_ifindex(addr, this->ifindex);
+    ip = htonl(ip);
+    if((local_addr = nl_addr_build(AF_INET, &ip, 4)) == NULL) {
+      perror("addr parse");
+      exit(1);
+    }
+    local_addr->a_prefixlen = 30;
+    char tmp[1024];
+    nl_addr2str (local_addr, tmp, 1024);
+    printf("setting ip %s on intf br0(%d)\n", tmp, this->ifindex);
+    if(rtnl_addr_set_local(addr, local_addr) != 0) {
+      perror("addr_set_local");
+      exit(1);
+    }
+
+    // Build the netlink message and send it to the kernel, the operation will
+    // block until the operation has been completed. Alternatively the required
+    // netlink message can be built using rtnl_addr_build_add_request() to be
+    // sent out using nl_send_auto_complete().
+    int ret = rtnl_addr_add(sk, addr, 0);
+    if( (ret < 0) && ( abs(ret) != NLE_EXIST)) {
+      nl_perror(ret, "addr_set_local");
+      exit(1);
+    }
+
+    // Free the memory
+    //nl_addr_destroy(local_addr);
+    rtnl_addr_put(addr);    
+  }
+
+
+  /////////////////////////////////////
+  //   Packet generation methods
+  /////////////////////////////////////
 
   size_t
   dhcp::generate_dhcp_reply(uint8_t **ret, struct dhcp_packet  * dhcp, 
@@ -643,23 +786,6 @@ namespace vigil
     options[0] = 0xff;
     return len;
   }
-
-  std::string
-  dhcp::hello_world() {
-    return string("Hello World!!!");
-  }
-
-  std::vector<std::string> 
-  dhcp::get_dhcp_mapping() { 
-    std::map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter = 
-      this->mac_mapping.begin();
-    std::vector<std::string> v;
-    for (; iter != this->mac_mapping.end(); iter++) {
-      if(iter->second == NULL) continue;
-      v.push_back(iter->second->string()); 
-    }
-    return v;
-  };
 
   REGISTER_COMPONENT(Simple_component_factory<dhcp>,
 		     dhcp);

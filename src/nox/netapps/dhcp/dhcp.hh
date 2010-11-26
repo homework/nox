@@ -24,6 +24,16 @@
 #include <utility>
 
 #include <net/ethernet.h>  
+#include <sys/types.h>          /* See NOTES */
+#include <sys/socket.h>   
+#include <linux/netlink.h> 
+#include <netlink/netlink.h>
+#include <netlink/object-api.h>
+#include <linux/pkt_sched.h>
+#include <netlink-types.h> 
+#include <netlink/addr.h>
+#include <netlink/route/link.h> 
+#include <netlink/route/addr.h> 
 #include <netlink/socket.h>
 
 #include "component.hh"
@@ -159,6 +169,7 @@ struct arphdr {
     bool check_access(const ethernetaddr& ether);
     bool ip_matching(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
     uint32_t find_free_ip(const ipaddr& subnet, int netmask);
+    bool add_addr(uint32_t ip);
 
     //a pointer to the proxy of the module
     applications::dhcp_proxy *p_dhcp_proxy;
