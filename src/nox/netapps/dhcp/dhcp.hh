@@ -23,7 +23,8 @@
 #include <map>
 #include <utility>
 
-#include <net/ethernet.h>
+#include <net/ethernet.h>  
+#include <netlink/socket.h>
 
 #include "component.hh"
 #include "netinet++/datapathid.hh"
@@ -159,15 +160,20 @@ struct arphdr {
     bool ip_matching(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
     uint32_t find_free_ip(const ipaddr& subnet, int netmask);
 
-
+    //a pointer to the proxy of the module
     applications::dhcp_proxy *p_dhcp_proxy;
 
-    //somewhere to store the datapaths
+    //datapath storage
     std::vector<datapathid*> registered_datapath;
 
     //storage of the ip to mac translation throught the dhcp protocol 
     std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
     std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
+
+    //netlink control
+    struct nl_sock *sk;              //
+    int ifindex;                              //index of the interface. TODO: not sure if this change if 
+                                                    // interfaces go up and down. 
 
   };
 }

@@ -1,13 +1,19 @@
 #include "dhcp.hh"
 #include "dhcp_proxy.hh"
 
-#include <boost/bind.hpp>
-#include <boost/shared_array.hpp>
 #include <map>
 #include <utility>
+#include <linux/netlink.h>     
+#include <sys/types.h>          /* See NOTES */
+#include <sys/socket.h>      
+#include <netlink/netlink.h>
+#include <netlink/route/link.h>
 #include <net/ethernet.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
+
+#include <boost/bind.hpp>
+#include <boost/shared_array.hpp>
 
 #include "assert.hh"
 #include "component.hh"
@@ -23,6 +29,8 @@
 #include "dhcp_mapping.hh"
 
 #include "local_addr.hh"
+
+#define BRIDGE_INTERFACE_NAME "br0"
 
 #define MAX_ROUTABLE_LEASE_DURATION 30
 #define MAX_NON_ROUTABLE_LEASE_DURATION 30
@@ -57,7 +65,31 @@ namespace vigil
   static Vlog_module lg("dhcp");
 
   void dhcp::configure(const Configuration* c) {
+    struct nl_cache *cache;
+
     lg.dbg(" Configure called ");
+    
+    //initialiaze and connect the socket to the netlink socket
+    if((this->sk = nl_socket_alloc()) == NULL) {
+      perror("socket alloc");
+      exit(1);
+    }
+    if(nl_connect(sk, 0 /*NETLINK_ROUTE*/ ) != 0) {
+      perror("nl connect");
+      exit(1);
+    }
+    
+    //looking the index of the bridge  
+    if ( (rtnl_link_alloc_cache(sk, &cache) ) != 0) {
+      perror("link alloc cache");
+      exit(1);
+    }
+
+    if ( ( this->ifindex = rtnl_link_name2i(cache,  BRIDGE_INTERFACE_NAME) ) == 0) {
+      perror("Failed to translate interface name to int");
+      exit(1);
+    }
+    printf("Retrieving ix %d for intf %s\n", this->ifindex, BRIDGE_INTERFACE_NAME);
   }
 
   void 
@@ -641,10 +673,10 @@ generate_openflow_dhcp_flow(ofp_flow_mod* ofm, size_t size) {
   ofm->header.length = htons(size);
   ofm->match.wildcards = htonl(OFPFW_IN_PORT |  OFPFW_DL_VLAN | 
 			       OFPFW_DL_VLAN_PCP | OFPFW_NW_TOS |  OFPFW_DL_SRC |  
-			       OFPFW_DL_DST | OFPFW_NW_SRC_ALL);
+			       OFPFW_DL_DST | OFPFW_NW_SRC_ALL | OFPFW_NW_DST_ALL);
   ofm->match.dl_type = htons(0x0800);
   //ofm->match.nw_src = inet_addr("0.0.0.0");
-  ofm->match.nw_dst =  inet_addr("255.255.255.255");
+  //ofm->match.nw_dst =  inet_addr("255.255.255.255");
   ofm->match.nw_proto = 17;
   ofm->match.tp_src = htons(68);
   ofm->match.tp_dst = htons(67);
