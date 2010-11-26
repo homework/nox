@@ -1,13 +1,17 @@
-1) Test how bridging will work.
+OK 1) Test how bridging will work.
 2) Test dhcp code.
 OK   - How the ip assignment work? Do I get unique ips? Do I get the same ip if I ask again? Develop test scenarios with the python script that does fake dhcp requests. (works so far in assinging unique ip's. Current setup has small lease times)
 OK   - How can I query homework module and know if a mac address is allowed to get an ip.(fixed a function on the proxy class)
-   - How can I invalidate an IP address? (Better create a function in the dhcp module that recalls all flow configuration and define the lease time before now)
 OK   - Develop a web service to get the assignment status of the dhcp server.  (returns a json array of string represtations of the mappings)
+   - How can I invalidate an IP address? (Better create a function in the dhcp module that recalls all flow configuration and define the lease time before now)
+   - Timeout ip leases.
+   - Check on packet_in handling if the ip address is timed out and revoke all structures.
 
 3) Perform a test with arp poisonning.
    - Can two client communicate if they both know their mac address?
    - Can I detect something like this? 
+   - check if somebody is trying to communicate without the switch and see how I can detect that by sniffing data. 
+   
 4) Test dhcp code with different clients:
    - Linux (check what dhcp clients are there? Maybe check also older versions? )
    - Windows (windows, vista and windows 7)

@@ -297,10 +297,10 @@ namespace vigil
     Flow flow(pi.in_port, *(pi.get_buffer()));
     uint32_t buffer_id = pi.buffer_id;
     ethernetaddr dl_dst;
-    bool is_dst_router = (ntohl(flow.nw_dst) == ntohl(flow.nw_src) + 1);
     bool is_src_router = (ntohs(flow.in_port) != OFPP_LOCAL);
     printf("Pkt in received: %s(type:%x, proto:%x) %s->%s\n", pi.get_name().c_str(), 
-   	   flow.dl_type , flow.nw_proto, flow.dl_src.string().c_str(), flow.dl_dst.string().c_str());
+	   flow.dl_type, flow.nw_proto, flow.dl_src.string().c_str(), 
+	   flow.dl_dst.string().c_str());
 
     //check if src ip is routable and the src mac address is permitted.
     if( (!is_src_router) && 
@@ -310,7 +310,8 @@ namespace vigil
     }
 
     //check if src ip is routable and the src mac address is permitted.
-    if(!ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_src))) ) {
+    if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, 
+		    ipaddr(ntohl(flow.nw_src))) ) {
       printf("src ip %s is not routable. Better wait to get proper ip.\n", 
 	     ipaddr(ntohl(flow.nw_src)).string().c_str());
       return STOP;
@@ -319,28 +320,30 @@ namespace vigil
     //check if dst ip is routable and we have a mac address for it.
     if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, 
 		   ipaddr(ntohl(flow.nw_dst))) ) {
-      printf("dst ip %s is not routable.\n", 
-	     ipaddr(ntohl(flow.nw_dst)).string().c_str());
+      printf("dst ip %s is not routable.\n", ipaddr(ntohl(flow.nw_dst)).string().c_str());
       return STOP;
     }
+    
+    bool is_dst_local = (flow.in_port == OFPP_LOCAL);
+    printf("New rule pushed coming form port %X (%X) to port %d\n", flow.in_port, OFPP_LOCAL, 
+	   (is_dst_local)?1:0);
 
-    if ( (!is_dst_router) && 
-	(this->ip_mapping.find(ipaddr(ntohl(flow.nw_dst))) ==  this->ip_mapping.end())) {
-      printf("dst ip %s is not found.\n", ipaddr(ntohl(flow.nw_dst)).string().c_str());
-      return STOP;
-    }
-    if ((!is_dst_router) && (this->ip_mapping[ipaddr(ntohl(flow.nw_dst))] == NULL)) {
-      printf("dst ip %s is found but has no state.\n", 
-	     ipaddr(ntohl(flow.nw_dst)).string().c_str());
-      return STOP;
-    } else if ((!is_dst_router) && (this->ip_mapping[ipaddr(ntohl(flow.nw_dst))] != NULL)){
-      dl_dst = this->ip_mapping[ipaddr(ntohl(flow.nw_dst))]->mac;
-    }
+
+    // if ( (!is_dst_router) && 
+    // 	(this->ip_mapping.find(ipaddr(ntohl(flow.nw_dst))) ==  this->ip_mapping.end())) {
+    //   printf("dst ip %s is not found.\n", ipaddr(ntohl(flow.nw_dst)).string().c_str());
+    //   return STOP;
+    // }
+    // if ((!is_dst_router) && (this->ip_mapping[ipaddr(ntohl(flow.nw_dst))] == NULL)) {
+    //   printf("dst ip %s is found but has no state.\n", 
+    // 	     ipaddr(ntohl(flow.nw_dst)).string().c_str());
+    //   return STOP;
+    // } else if ((!is_dst_router) && (this->ip_mapping[ipaddr(ntohl(flow.nw_dst))] != NULL)){
+    //   dl_dst = this->ip_mapping[ipaddr(ntohl(flow.nw_dst))]->mac;
+    // }
 
     ofp_flow_mod* ofm;
-    size_t size = sizeof(*ofm) 
-      + ((is_dst_router | is_src_router)?0:2*sizeof(ofp_action_dl_addr)) 
-      + sizeof(ofp_action_output);
+    size_t size = sizeof(*ofm) + sizeof(ofp_action_output);
     boost::shared_array<char> raw_of(new char[size]);
     ofm = (ofp_flow_mod*) raw_of.get();
     ofm->header.version = OFP_VERSION;
@@ -366,35 +369,13 @@ namespace vigil
     ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
     ofm->priority = htons(OFP_DEFAULT_PRIORITY);
     ofm->flags = htons( OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP);
-    if(!is_src_router && !is_dst_router) {
-      ofp_action_dl_addr& action_dl = *((ofp_action_dl_addr*)(ofm->actions));
-      memset(&action_dl , 0, sizeof(ofp_action_dl_addr));
-      action_dl.type = htons(OFPAT_SET_DL_SRC);
-      action_dl.len = htons(sizeof(ofp_action_dl_addr));
-      memcpy(action_dl.dl_addr, HOST_DST_ETH_ADDR, OFP_ETH_ALEN);
-      ofp_action_dl_addr& action_dl_dst = *((ofp_action_dl_addr*)(ofm->actions)+1);
-      memset(&action_dl_dst , 0, sizeof(ofp_action_dl_addr));
-      action_dl_dst.type = htons(OFPAT_SET_DL_DST);
-      action_dl_dst.len = htons(sizeof(ofp_action_dl_addr));
-      memcpy(action_dl_dst.dl_addr,  (const uint8_t *)dl_dst, OFP_ETH_ALEN);
-      //2*ofp_action == 1*ofp_action_dl_addr
-      ofp_action_output& action = *((ofp_action_output*)(ofm->actions + 4)); 
-      memset(&action, 0, sizeof(ofp_action_output));
-      action.type = htons(OFPAT_OUTPUT);
-      action.len = htons(sizeof(ofp_action_output));
-      action.max_len = htons(2000);
-      action.port = htons(OFPP_IN_PORT); 
-    } else {
-      ofp_action_output& action = *((ofp_action_output*)(ofm->actions)); 
-      memset(&action, 0, sizeof(ofp_action_output));
-      action.type = htons(OFPAT_OUTPUT);
-      action.len = htons(sizeof(ofp_action_output));
-      action.max_len = htons(2000);
+    ofp_action_output& action = *((ofp_action_output*)(ofm->actions)); 
+    memset(&action, 0, sizeof(ofp_action_output));
+    action.type = htons(OFPAT_OUTPUT);
+    action.len = htons(sizeof(ofp_action_output));
+    action.max_len = htons(2000);    
+    action.port = (is_dst_local)?htons(1):htons(0); 
 
-      //TODO: this has to be controlled locally. Map on each dhcp request
-      //on which port I found an ip
-      action.port = (is_dst_router)?htons(0):htons(1); 
-    }
     send_openflow_command(pi.datapath_id, &ofm->header, true);
     return CONTINUE;
   }
@@ -436,6 +417,7 @@ namespace vigil
     struct udphdr *udp = (struct udphdr *)(data + pointer);
     if( (ntohs(udp->dest) != 67) || (ntohs(udp->source) != 68)) {
       printf("This is nor DHCP traffic!\n");
+      this->packet_in_handler(e);
       return CONTINUE;
     }  
     pointer += sizeof(struct udphdr);
