@@ -147,10 +147,10 @@ namespace vigil
       generate_openflow_dhcp_flow(ofm, size);
       send_openflow_command(**it, &ofm->header, true);
     }
-    //timeval tv = {FLOW_TIMEOUT_DURATION,0};
-    //post(boost::bind(&dhcp::refresh_default_flows, this), tv);
+    timeval tv = {FLOW_TIMEOUT_DURATION,0};
+    post(boost::bind(&dhcp::refresh_default_flows, this), tv);
   }
-
+  
   /////////////////////////////////////
   //   Datapath event handling
   /////////////////////////////////////
@@ -391,6 +391,14 @@ namespace vigil
     //    ) {                 
     //   return CONTINUE;
     // } 
+
+    // for some reason events are only fired for this action when nox 
+    // sees udp traffic. 
+    if( (ntohs(flow.tp_dst) != 67) || (ntohs(flow.tp_src) != 68)) {
+      printf("This is nor DHCP traffic!\n");
+      this->packet_in_handler(e);
+      return CONTINUE;
+    }  
     
     uint8_t *data = pi.get_buffer()->data(), *reply = NULL;
     int32_t data_len = pi.get_buffer()->size();
@@ -415,11 +423,6 @@ namespace vigil
 
     //parse udp header
     struct udphdr *udp = (struct udphdr *)(data + pointer);
-    if( (ntohs(udp->dest) != 67) || (ntohs(udp->source) != 68)) {
-      printf("This is nor DHCP traffic!\n");
-      this->packet_in_handler(e);
-      return CONTINUE;
-    }  
     pointer += sizeof(struct udphdr);
     data_len -= sizeof(struct udphdr);
     uint16_t dhcp_len = ntohs(udp->len) - sizeof(struct udphdr);
@@ -432,6 +435,7 @@ namespace vigil
 
     //get the exact message type of the dhcp request
     uint8_t dhcp_msg_type = 0;
+    uint32_t requested_ip = 0;
     while(data_len > 2) {
       uint8_t dhcp_option = data[pointer];
       uint8_t dhcp_option_len = data[pointer+1];
@@ -439,26 +443,32 @@ namespace vigil
       //pointer,(long long unsigned int)dhcp->cookie, data[pointer], data[pointer+1], 
       // dhcp_option, dhcp_option_len);
       
-      if(dhcp_option == 53) {
+      
+      if(dhcp_option == 0xff) {
+      	printf("Got end of options!!!!\n");
+     	break;
+      } else if(dhcp_option == 53) {
 	dhcp_msg_type = data[pointer + 2];
 	if((dhcp_msg_type <1) || (dhcp_msg_type > 8)) {
 	  printf("Invalid DHCP Message Type : %d\n", dhcp_msg_type);
 	  return STOP;
-	}
+	} 
+      }else if(dhcp_option == 50) {
+	memcpy(&requested_ip, data + pointer + 2, 4);
+	struct in_addr in;
+	in.s_addr = requested_ip;
+	printf("requested ip : %s\n", inet_ntoa(in));
 	//printf("dhcp msg type : %s\n", dhcp_msg_type_name[dhcp_msg_type]);
-	break;
-      }
-      if(dhcp_option == 0xff) {
-      	printf("Got end of options!!!!\n");
-     	break;
-      }
+	}
+    
       data_len -=(2 + dhcp_option_len );
       pointer +=(2 + dhcp_option_len );
     }
     //Must create a fucntion that chooses this ip for the state of the DHCP server. 
-    //uint32_t send_ip = htonl(inet_addr("10.1.1.1"));
-
     ipaddr send_ip = this->select_ip(ethernetaddr(ether->ether_shost), dhcp_msg_type);
+
+    //if() {
+    //}
 
     //TODO: if ip is routable, add ip to the interface
     if(this->ip_matching(ipaddr(ROUTABLE_SUBNET),ROUTABLE_NETMASK, ntohl((uint32_t)send_ip))) {
@@ -678,7 +688,9 @@ namespace vigil
 			    uint8_t dhcp_msg_type) {
     //uint8_t *ret = NULL;
     int len =  sizeof( struct ether_header) + sizeof(struct iphdr) + 
-      sizeof(struct udphdr) + sizeof(struct dhcp_packet) + 3 + 6 + 6 + 6 + 6 + 6 + 1;
+      sizeof(struct udphdr) + sizeof(struct dhcp_packet) + 3
+      + 6 + 6 + 6 + 6 + 6 + 1;
+    
     //message_type + netmask + router + nameserver + lease_time + end option
     //lease time is seconds since it will timeout
 
@@ -691,9 +703,10 @@ namespace vigil
     ether->ether_type = htons(ETHERTYPE_IP);
     memcpy(ether->ether_dhost, (const uint8_t *)flow->dl_src, ETH_ALEN);
     // 08:00:27:ee:1d:9f
-    ether->ether_shost[0]=0x08;ether->ether_shost[1]=0x00;
-    ether->ether_shost[2]=0x27; ether->ether_shost[3]=0xee;
-    ether->ether_shost[4]=0x1d;ether->ether_shost[5]=0x9f;
+    memcpy(ether->ether_dhost, host_eth_addr, ETH_ALEN);
+    //    ether->ether_shost[0]=0x08;ether->ether_shost[1]=0x00;
+    /// ether->ether_shost[2]=0x27; ether->ether_shost[3]=0xee;
+    //ether->ether_shost[4]=0x1d;ether->ether_shost[5]=0x9f;
  
    //setting up ip header details   
     struct iphdr *ip = (struct iphdr *) (*ret + sizeof(struct ether_header));
@@ -724,10 +737,12 @@ namespace vigil
     reply->htype = 0x01;
     reply->hlen = 0x6;
     reply->xid = dhcp->xid;
-    reply->yiaddr = (uint32_t)htonl(send_ip); //inet_addr("10.2.0.2");
-    reply->siaddr =  (uint32_t)htonl(send_ip + 1); //inet_addr("10.2.0.1"); 
+    if(dhcp_msg_type != DHCPNAK) { 
+      reply->yiaddr = (uint32_t)htonl(send_ip); //inet_addr("10.2.0.2");
+      reply->siaddr =  (uint32_t)htonl(send_ip + 1); //inet_addr("10.2.0.1"); 
+    }
     memcpy(reply->chaddr, (const uint8_t *)flow->dl_src, 6);
-    reply->cookie =  dhcp->cookie; //inet_addr("10.2.0.1"); 
+    reply->cookie =  dhcp->cookie;
 
     //setting up options
     uint8_t *options = (uint8_t *)(*ret + sizeof(struct ether_header) + 
@@ -739,6 +754,12 @@ namespace vigil
     options[1] = 1;
     options[2] = dhcp_msg_type;
     options += 3;
+    // if this is a NAK, we don't need to set the other fields
+    if(dhcp_msg_type == DHCPNAK) {
+      options[0] = 0xff; 
+      return len;
+    }
+   
     //netmask 
     options[0] = 1;
     options[1] = 4;
