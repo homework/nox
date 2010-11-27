@@ -160,16 +160,19 @@ struct arphdr {
     std::string hello_world();
     std::vector<std::string> get_dhcp_mapping(); 
     void register_proxy(applications::dhcp_proxy  *proxy);
+
+    void revoke_mac_access(const ethernetaddr& ether); 
   private:
     size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
 			       uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 
-			       uint8_t dhcp_msg_type);
+			       uint8_t dhcp_msg_type, uint32_t lease);
     void refresh_default_flows();
     ipaddr select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) ;
     bool check_access(const ethernetaddr& ether);
     bool ip_matching(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
     uint32_t find_free_ip(const ipaddr& subnet, int netmask);
     bool add_addr(uint32_t ip);
+    bool del_addr(uint32_t ip);
 
     //a pointer to the proxy of the module
     applications::dhcp_proxy *p_dhcp_proxy;

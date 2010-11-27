@@ -57,6 +57,9 @@ namespace std {
       def get_dhcp_mapping(self):
         return self.pscpa.get_mapping()
 
+      def revoke_mac_addr(self, ether):
+        return self.pscpa.revoke_ether_addr(ether)
+
       def register_object(self, obj):
         self.pscpa.register_object(obj)
 

@@ -12,7 +12,7 @@ namespace vigil {
   struct dhcp_mapping {
     struct ipaddr ip;
     struct ethernetaddr mac;
-    uint32_t lease_end;
+    time_t lease_end;
     
     //------------------------------------------
     // constructor and distructors

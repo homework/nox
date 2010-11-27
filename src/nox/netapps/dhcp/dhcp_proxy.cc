@@ -75,9 +75,15 @@ namespace vigil {
       return ret;
     }
     
-    std::vector<std::string> dhcp_proxy::get_mapping() {
+    std::vector<std::string> 
+    dhcp_proxy::get_mapping() {
       return (std::vector<std::string>)this->p_dhcp->get_dhcp_mapping();
     };
-
+  
+    void
+    dhcp_proxy::revoke_ether_addr(ethernetaddr ether) {
+      this->p_dhcp->revoke_mac_access(ether);
+    }
+    
   } // namespace applications
 } // namespace vigil
