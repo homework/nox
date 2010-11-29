@@ -467,9 +467,6 @@ namespace vigil
     //Must create a fucntion that chooses this ip for the state of the DHCP server. 
     ipaddr send_ip = this->select_ip(ethernetaddr(ether->ether_shost), dhcp_msg_type);
 
-    //if() {
-    //}
-
     //TODO: if ip is routable, add ip to the interface
     if(this->ip_matching(ipaddr(ROUTABLE_SUBNET),ROUTABLE_NETMASK, ntohl((uint32_t)send_ip))) {
       this->add_addr(ntohl((uint32_t)send_ip) + 1);
@@ -480,6 +477,13 @@ namespace vigil
     uint8_t reply_msg_type = (dhcp_msg_type == DHCPDISCOVER? 
 			      DHCPOFFER:DHCPACK);
 
+    if((requested_ip != 0) && (send_ip != requested_ip) && 
+       (reply_msg_type == DHCPREQUEST) ) {
+      struct in_addr in;
+      in.s_addr = send_ip;
+      printf("DHCPREQUEST but send_ip %s different from requested %d\n", inet_ntoa(in));
+      reply_msg_type = DHCPNACK;
+    }
     size_t len = generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, 
 				     ntohl((uint32_t)send_ip), reply_msg_type);
 
