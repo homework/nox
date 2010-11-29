@@ -35,6 +35,8 @@
 #include <netlink/route/link.h> 
 #include <netlink/route/addr.h> 
 #include <netlink/socket.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
 
 #include "component.hh"
 #include "netinet++/datapathid.hh"

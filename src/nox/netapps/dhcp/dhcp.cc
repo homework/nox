@@ -66,6 +66,9 @@ namespace vigil
   void dhcp::configure(const Configuration* c) {
     struct nl_cache *cache;
 
+    struct ifreq ifr;
+    int s;
+
     lg.dbg(" Configure called ");
     
     //initialiaze and connect the socket to the netlink socket
@@ -89,6 +92,34 @@ namespace vigil
       exit(1);
     }
     printf("Retrieving ix %d for intf %s\n", this->ifindex, BRIDGE_INTERFACE_NAME);
+
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s==-1) {
+      perror("Failed to open socket");
+      exit(1);
+    }
+
+    ifr.ifr_addr.sa_family = AF_INET;
+    strncpy(ifr.ifr_name, BRIDGE_INTERFACE_NAME, sizeof(BRIDGE_INTERFACE_NAME));
+
+    if(ioctl(s, SIOCGIFHWADDR, &ifr) < 0) {
+      perror("Failed to get mac address");
+      exit(1);
+    }
+
+    /* display result */
+    printf("%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",
+	   (unsigned char)ifr.ifr_hwaddr.sa_data[0],
+	   (unsigned char)ifr.ifr_hwaddr.sa_data[1],
+	   (unsigned char)ifr.ifr_hwaddr.sa_data[2],
+	   (unsigned char)ifr.ifr_hwaddr.sa_data[3],
+	   (unsigned char)ifr.ifr_hwaddr.sa_data[4],
+	   (unsigned char)ifr.ifr_hwaddr.sa_data[5]);
+    
+    close(s);
+
+    
+
   }
 
 
@@ -297,16 +328,28 @@ namespace vigil
     Flow flow(pi.in_port, *(pi.get_buffer()));
     uint32_t buffer_id = pi.buffer_id;
     ethernetaddr dl_dst;
+    dhcp_mapping *state = NULL;
     bool is_src_router = (ntohs(flow.in_port) != OFPP_LOCAL);
     printf("Pkt in received: %s(type:%x, proto:%x) %s->%s\n", pi.get_name().c_str(), 
 	   flow.dl_type, flow.nw_proto, flow.dl_src.string().c_str(), 
 	   flow.dl_dst.string().c_str());
+
 
     //check if src ip is routable and the src mac address is permitted.
     if( (!is_src_router) && 
        (!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) ) {
       printf("MAC address %s is not permitted to send data\n", flow.dl_src.string().c_str());
       return STOP;
+    }
+
+    // find state for source - in case the address comes 
+    // from the server ignore state rquirement. 
+    if(!is_src_router) {
+      if((this->mac_mapping.find(flow.dl_src) == this->mac_mapping.end())  || 
+	 ((state = this->mac_mapping[flow.dl_src]) == NULL) ){
+	printf("No state found for source mac\n");
+	return STOP;
+      }
     }
 
     //check if src ip is routable and the src mac address is permitted.
