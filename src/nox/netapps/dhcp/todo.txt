@@ -3,11 +3,10 @@ OK 1) Test how bridging will work.
 OK   - How the ip assignment work? Do I get unique ips? Do I get the same ip if I ask again? Develop test scenarios with the python script that does fake dhcp requests. (works so far in assinging unique ip's. Current setup has small lease times)
 OK   - How can I query homework module and know if a mac address is allowed to get an ip.(fixed a function on the proxy class)
 OK   - Develop a web service to get the assignment status of the dhcp server.  (returns a json array of string represtations of the mappings)
-   - How can I invalidate an IP address? (Better create a function in the dhcp module that recalls all flow configuration and define the lease time before now)
-   - Timeout ip leases.
-   - Check on packet_in handling if the ip address is timed out and revoke all structures.
-   - Increase lease time for routable ips
-   - On dhcprequest, answer with an nack if the proposed ip is not the one I am planning to server in the end. 
+OK   - How can I invalidate an IP address? (Better create a function in the dhcp module that recalls all flow configuration and define the lease time before now) - the switch creates some default rules that  can never invalidate. BY removing the ip though libnl I can achieve better results.
+   - Timeout ip leases. Check on packet_in handling if the ip address is timed out and revoke all structures.
+OK   - Increase lease time for routable ips
+OK   - On dhcprequest, answer with an nack if the proposed ip is not the one I am planning to server in the end. 
 
 3) Perform a test with arp poisonning.
    - Can two client communicate if they both know their mac address?

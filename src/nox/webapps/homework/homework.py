@@ -235,6 +235,7 @@ def deny(eaddr, ipaddr):
         #Homework.delete_strict_datapath_flow(dpid, pattern)
     if eaddr in Homework.st['permitted']:
         del Homework.st['permitted'][eaddr]
+    data = Homework._dhcp.revoke_mac_addr(eaddr)
     return status()
 
 def ws_deny(request, args):

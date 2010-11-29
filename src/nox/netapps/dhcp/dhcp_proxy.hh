@@ -24,6 +24,7 @@ namespace vigil {
       void register_object(PyObject *p_obj);
       std::vector<std::string> get_mapping();
       bool is_ether_addr_routable(ethernetaddr ether);
+      void revoke_ether_addr(ethernetaddr ether);
       
     protected:   
       dhcp* p_dhcp;
