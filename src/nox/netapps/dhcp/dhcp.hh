@@ -186,7 +186,9 @@ struct arphdr {
     std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
     std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
 
-    //netlink control
+    ethernetaddr bridge_mac;
+
+    //netlink control  
     struct nl_sock *sk;              //
     int ifindex;                              //index of the interface. TODO: not sure if this change if 
                                                     // interfaces go up and down. 

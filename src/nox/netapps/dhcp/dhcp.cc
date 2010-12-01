@@ -23,7 +23,7 @@
 #include "netinet++/ipaddr.hh"
 #include "dhcp_mapping.hh"
 
-#include "local_addr.hh"
+//#include "local_addr.hh"
 
 #define BRIDGE_INTERFACE_NAME "br0"
 
@@ -39,12 +39,6 @@
 #define MAX_IP_LEN 32
 
 #define FLOW_TIMEOUT_DURATION 10
-
-//TODO: this has to be defined dynamically st configuration state (check oflops. it has a similar code)
-//#define HOST_DST_ETH_ADDR host_eth_addr 
-//"\x08\x00\x27\x45\xa4\x32" 
-//"\x08\x00\x27\xaf\x01\xc9"
-//const uint8_t host_eth_addr[] = {0x08, 0x00, 0x27, 0xaf, 0x01, 0xc9};
 
 const char *dhcp_msg_type_name[] = {NULL, "DHCPDiscover", "DHCPOffer", 
 				    "DHCPRequest", "DHCPDecline", "DHCPAck", 
@@ -65,7 +59,7 @@ namespace vigil
   /////////////////////////////////////
   void dhcp::configure(const Configuration* c) {
     struct nl_cache *cache;
-
+    unsigned char addr[ETH_ALEN];
     struct ifreq ifr;
     int s;
 
@@ -116,10 +110,11 @@ namespace vigil
 	   (unsigned char)ifr.ifr_hwaddr.sa_data[4],
 	   (unsigned char)ifr.ifr_hwaddr.sa_data[5]);
     
-    close(s);
-
+    memcpy(addr, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
     
-
+    this->bridge_mac = ethernetaddr(addr);
+    printf("br0 mac addr : %s\n", this->bridge_mac.string().c_str());
+    close(s);
   }
 
 
@@ -294,7 +289,7 @@ namespace vigil
     struct ether_header *ether = (struct ether_header *) reply;
     ether->ether_type = htons(ETHERTYPE_ARP);
     memcpy(ether->ether_dhost, (const uint8_t *)flow.dl_src, ETH_ALEN);
-    memcpy(ether->ether_shost, HOST_DST_ETH_ADDR, ETH_ALEN);
+    memcpy(ether->ether_shost, (const uint8_t *)this->bridge_mac, ETH_ALEN);
 
     // add here code to check if the ip requested is allowed to 
     // be accessed by host
@@ -304,7 +299,7 @@ namespace vigil
     //change the fields that are important
     arp_reply->ar_op = htons(ARPOP_REPLY);
     memcpy(arp_reply->ar_tha, arp_reply->ar_sha, ETH_ALEN);
-    memcpy(arp_reply->ar_sha, HOST_DST_ETH_ADDR, ETH_ALEN);
+    memcpy(arp_reply->ar_sha,  (const uint8_t *)this->bridge_mac, ETH_ALEN);
 
     for (int i = 0 ; i < 6 ; i++) {
       printf("%02x:", arp_reply->ar_tha[i]);
@@ -328,29 +323,16 @@ namespace vigil
     Flow flow(pi.in_port, *(pi.get_buffer()));
     uint32_t buffer_id = pi.buffer_id;
     ethernetaddr dl_dst;
-    dhcp_mapping *state = NULL;
-    bool is_src_router = (ntohs(flow.in_port) != OFPP_LOCAL);
+    dhcp_mapping *src_state = NULL, *dst_state = NULL;
+    bool is_src_router = (flow.in_port == OFPP_LOCAL);
+    bool is_dst_router = (flow.dl_dst == this->bridge_mac);
+    bool is_dst_local = 0;
+    bool is_src_local = 0;
+    int dst_port = 0;
+
     printf("Pkt in received: %s(type:%x, proto:%x) %s->%s\n", pi.get_name().c_str(), 
 	   flow.dl_type, flow.nw_proto, flow.dl_src.string().c_str(), 
 	   flow.dl_dst.string().c_str());
-
-
-    //check if src ip is routable and the src mac address is permitted.
-    if( (!is_src_router) && 
-       (!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) ) {
-      printf("MAC address %s is not permitted to send data\n", flow.dl_src.string().c_str());
-      return STOP;
-    }
-
-    // find state for source - in case the address comes 
-    // from the server ignore state rquirement. 
-    if(!is_src_router) {
-      if((this->mac_mapping.find(flow.dl_src) == this->mac_mapping.end())  || 
-	 ((state = this->mac_mapping[flow.dl_src]) == NULL) ){
-	printf("No state found for source mac\n");
-	return STOP;
-      }
-    }
 
     //check if src ip is routable and the src mac address is permitted.
     if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, 
@@ -366,10 +348,56 @@ namespace vigil
       printf("dst ip %s is not routable.\n", ipaddr(ntohl(flow.nw_dst)).string().c_str());
       return STOP;
     }
-    
-    bool is_dst_local = (flow.in_port == OFPP_LOCAL);
-    printf("New rule pushed coming form port %X (%X) to port %d\n", flow.in_port, OFPP_LOCAL, 
-	   (is_dst_local)?1:0);
+
+
+    //check if src ip is routable and the src mac address is permitted.
+    if( (!is_src_router) && 
+       (!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) ) {
+      printf("MAC address %s is not permitted to send data\n", flow.dl_src.string().c_str());
+      return STOP;
+    }
+
+    // find state for source - in case the address comes 
+    // from the server ignore state rquirement. 
+    is_src_local = ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_src)));
+
+    if(!is_src_router) {
+      if((this->mac_mapping.find(flow.dl_src) == this->mac_mapping.end())  || 
+	 ((src_state = this->mac_mapping[flow.dl_src]) == NULL) ){
+	printf("No state found for source mac\n");
+	return STOP;
+      }  
+      if( src_state->ip != flow.nw_src ){
+	printf("Source hosts uses unassigned ip address\n");
+	return STOP;
+      }
+    } else if(flow.dl_src != this->bridge_mac) {
+      printf("received packet from bridge without correct mac. discarding\n");
+      return STOP;
+    }
+
+
+    //checkin proper output port by checkin the dst mac and ip
+    if(ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, 
+		   ipaddr(ntohl(flow.nw_dst))) ) {
+      //printf("check mac %s\n", (flow.dl_dst == this->bridge_mac)?"yes":"no");
+      //printf("check ip %s\n", (this->ip_mapping.find(ipaddr(ntohl(flow.nw_dst) - 1)) != this->ip_mapping.end())?"yes":"no");
+      //required assumption for  packet destined to the bridged intf. 
+      if((flow.dl_dst == this->bridge_mac) && 
+	 (this->ip_mapping.find(ipaddr(htonl(flow.nw_dst) - 1)) != this->ip_mapping.end())) {
+	dst_port = 0;
+	//reuired properties for a packet to be destined to one of the internal hosts.
+      } else if ( (this->ip_mapping.find(ipaddr(ntohl(flow.nw_dst))) != this->ip_mapping.end()) ) {
+	//output to port 1
+	dst_port = 1;
+      } else {
+	printf("destination mac and ip where incorrect.\n");
+	return STOP;
+      }
+    } else 
+      dst_port = 0;
+
+    is_dst_local = ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_dst)));
 
 
     // if ( (!is_dst_router) && 
@@ -387,6 +415,9 @@ namespace vigil
 
     ofp_flow_mod* ofm;
     size_t size = sizeof(*ofm) + sizeof(ofp_action_output);
+    if(is_dst_local && is_src_local && (dst_port != 0) && (!is_src_router))
+      size += 2*sizeof( ofp_action_dl_addr);
+
     boost::shared_array<char> raw_of(new char[size]);
     ofm = (ofp_flow_mod*) raw_of.get();
     ofm->header.version = OFP_VERSION;
@@ -412,12 +443,34 @@ namespace vigil
     ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
     ofm->priority = htons(OFP_DEFAULT_PRIORITY);
     ofm->flags = htons( OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP);
-    ofp_action_output& action = *((ofp_action_output*)(ofm->actions)); 
-    memset(&action, 0, sizeof(ofp_action_output));
-    action.type = htons(OFPAT_OUTPUT);
-    action.len = htons(sizeof(ofp_action_output));
-    action.max_len = htons(2000);    
-    action.port = (is_dst_local)?htons(1):htons(0); 
+    if(is_dst_local && is_src_local && (dst_port != 0) && (!is_src_router)) {
+      //      ofp_action_dl_addr& act_dl_src = *((ofp_action_dl_addr*)(((void *)ofm->actions) + 8)); 
+      ofp_action_dl_addr& act_dl_src = *((ofp_action_dl_addr*)(ofm->actions)); 
+      memset(&act_dl_src, 0, sizeof(ofp_action_dl_addr));
+      act_dl_src.type = htons(OFPAT_SET_DL_SRC);
+      act_dl_src.len = htons(sizeof(ofp_action_dl_addr));
+      memcpy(act_dl_src.dl_addr, (const uint8_t *)this->bridge_mac, sizeof act_dl_src.dl_addr);
+      ofp_action_dl_addr& act_dl_dst = *((ofp_action_dl_addr*)(ofm->actions + 2)); 
+      memset(&act_dl_dst, 0, sizeof(ofp_action_dl_addr));
+      act_dl_dst.type = htons(OFPAT_SET_DL_DST);
+      act_dl_dst.len = htons(sizeof(ofp_action_dl_addr));
+      printf("dest mac : %s\n", this->ip_mapping[ipaddr(ntohl(flow.nw_dst))]->mac.string().c_str());
+      memcpy(act_dl_dst.dl_addr, (const uint8_t *)this->ip_mapping[ipaddr(ntohl(flow.nw_dst))]->mac, sizeof act_dl_dst.dl_addr);
+      ofp_action_output& action = *((ofp_action_output*)(ofm->actions + 4)); 
+      memset(&action, 0, sizeof(ofp_action_output));
+      action.type = htons(OFPAT_OUTPUT);
+      action.len = htons(sizeof(ofp_action_output));
+      action.max_len = htons(2000);    
+      action.port = (dst_port == flow.in_port)?htons(OFPP_IN_PORT):dst_port; //dst_port); 
+    } else {
+      ofp_action_output& action = *((ofp_action_output*)(ofm->actions)); 
+      memset(&action, 0, sizeof(ofp_action_output));
+      action.type = htons(OFPAT_OUTPUT);
+      action.len = htons(sizeof(ofp_action_output));
+      action.max_len = htons(2000);    
+      action.port = (dst_port == flow.in_port)?htons(OFPP_IN_PORT):dst_port; //htons(OFPP_IN_PORT); //dst_port);
+    }
+
 
     send_openflow_command(pi.datapath_id, &ofm->header, true);
     return CONTINUE;
@@ -869,7 +922,7 @@ namespace vigil
     struct ether_header *ether = (struct ether_header *) *ret;
     ether->ether_type = htons(ETHERTYPE_IP);
     memcpy(ether->ether_dhost, (const uint8_t *)flow->dl_src, ETH_ALEN);
-    memcpy(ether->ether_shost, host_eth_addr, ETH_ALEN);
+    memcpy(ether->ether_shost,  (const uint8_t *)this->bridge_mac, ETH_ALEN);
  
    //setting up ip header details   
     struct iphdr *ip = (struct iphdr *) (*ret + sizeof(struct ether_header));
