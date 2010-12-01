@@ -581,6 +581,13 @@ namespace vigil
       reply_msg_type = DHCPNAK;
     }
 
+    if((requested_ip != 0) && (send_ip != requested_ip) && 
+       (reply_msg_type == DHCPREQUEST) ) {
+      struct in_addr in;
+      in.s_addr = send_ip;
+      printf("DHCPREQUEST but send_ip %s different from requested %d\n", inet_ntoa(in));
+      reply_msg_type = DHCPNACK;
+    }
     size_t len = generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, 
 				     ntohl((uint32_t)send_ip), reply_msg_type, 
 				     is_routable?MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
