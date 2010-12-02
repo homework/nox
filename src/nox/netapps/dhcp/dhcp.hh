@@ -144,6 +144,7 @@ struct arphdr {
      */
     Disposition arp_handler(const Event& e);
     Disposition packet_in_handler(const Event& e);
+    Disposition pae_handler(const Event& e);
 
     /**
      * \brief check when new switches join

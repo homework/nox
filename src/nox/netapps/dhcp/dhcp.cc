@@ -144,11 +144,15 @@ namespace vigil
     expr.set_field(Packet_expr::DL_TYPE,  &val);
     printf("packet in rule: %s\n", expr.to_string().c_str());
     register_handler_on_match(10, expr,boost::bind(&dhcp::packet_in_handler, this, _1));
+    val = ethernet::PAE;
+    expr.set_field(Packet_expr::DL_TYPE,  &val);
+    printf("packet in rule: %s\n", expr.to_string().c_str());
+    register_handler_on_match(10, expr,boost::bind(&dhcp::pae_handler, this, _1));
  
     register_handler<Datapath_join_event>(boost::bind(&dhcp::datapath_join_handler, this, _1));
     register_handler<Datapath_leave_event>(boost::bind(&dhcp::datapath_leave_handler, this, _1));
     timeval tv = {1,0};
-    post(boost::bind(&dhcp::refresh_default_flows, this), tv);
+    //post(boost::bind(&dhcp::refresh_default_flows, this), tv);
   }
 
   void 
@@ -253,67 +257,49 @@ namespace vigil
 
     send_openflow_command(pi.datapath_id, &ofm->header, true);
     return STOP;
-    //check if sender is a routable ip. Otherwise
+  }
 
-    uint8_t *data = pi.get_buffer()->data(), *reply = NULL;
-    int32_t data_len = pi.get_buffer()->size();
-    int pointer = 0;
-
-    pointer += sizeof( struct ether_header);
-    data_len -=  sizeof( struct ether_header);
-
-    struct arphdr *arp = (struct arphdr *)(data + pointer);
+  Disposition dhcp::pae_handler(const Event& e) {
+    // chrck for better handling ioctrl and SIOCSARP
+    // it will allow to insert mac entries programmatically
+    // so that you can always control what is going on in the net.
+    const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
+    Flow flow(pi.in_port, *(pi.get_buffer()));
+    printf("eap received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
+    	   flow.dl_type , flow.nw_proto);
     
-    ///sanity check of what is being requested.
-    if((ntohs(arp->ar_hrd) != ARPHRD_ETHER) || 
-       (ntohs(arp->ar_pro) != 0x0800) || 
-       (arp->ar_hln != ETH_ALEN) || (arp->ar_pln != 4)) { 
-      printf("arp packet has invalid protocol or hw address fields\n");
+    if(flow.dl_src == ethernetaddr("00:25:d3:72:b5:1e")) {
+      printf("Skipping eap packet from 00:25:d3:72:b5:1e\n");
       return STOP;
     }
-    //
-    if(ntohs(arp->ar_op) != ARPOP_REQUEST) {
-      printf("Received a non arp request. Implement code to handle it!\n");
-      return STOP;
-    }
-    int len =  sizeof( struct ether_header) + sizeof(struct arphdr);
-    //allocate space for he dhcp reply
-    reply = new uint8_t[len];
-    memset(reply, 0, len);
-
-    printf("arp reply for ip %s from %s\n", 
-	   ipaddr(ntohl(arp->ar_tip)).string().c_str(), 
-	   flow.dl_src.string().c_str());
-
-    //ethernet setup
-    struct ether_header *ether = (struct ether_header *) reply;
-    ether->ether_type = htons(ETHERTYPE_ARP);
-    memcpy(ether->ether_dhost, (const uint8_t *)flow.dl_src, ETH_ALEN);
-    memcpy(ether->ether_shost, (const uint8_t *)this->bridge_mac, ETH_ALEN);
-
-    // add here code to check if the ip requested is allowed to 
-    // be accessed by host
-    struct arphdr *arp_reply = (struct arphdr *)(reply +  sizeof( struct ether_header));
-    memcpy(arp_reply, arp, sizeof(struct arphdr));
     
-    //change the fields that are important
-    arp_reply->ar_op = htons(ARPOP_REPLY);
-    memcpy(arp_reply->ar_tha, arp_reply->ar_sha, ETH_ALEN);
-    memcpy(arp_reply->ar_sha,  (const uint8_t *)this->bridge_mac, ETH_ALEN);
-
-    for (int i = 0 ; i < 6 ; i++) {
-      printf("%02x:", arp_reply->ar_tha[i]);
-    }
-    printf("\n");
-
-    uint32_t tmp = arp_reply->ar_sip; 
-    arp_reply->ar_sip = arp_reply->ar_tip;
-    arp_reply->ar_tip = tmp;
-
-    //send reply out of the received port
-    send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
-			 OFPP_IN_PORT, pi.in_port, 1);
-    //delete reply;
+    uint32_t buffer_id = pi.buffer_id;
+    ofp_flow_mod* ofm;
+    size_t size = sizeof(*ofm) + sizeof(ofp_action_output);
+    boost::shared_array<char> raw_of(new char[size]);
+    ofm = (ofp_flow_mod*) raw_of.get();
+    ofm->header.version = OFP_VERSION;
+    ofm->header.type = OFPT_FLOW_MOD;
+    ofm->header.length = htons(size);
+    ofm->match.wildcards =htonl(~(OFPFW_IN_PORT | OFPFW_DL_SRC | OFPFW_DL_TYPE));
+    ofm->match.in_port = htons(flow.in_port);
+    ofm->match.dl_type = flow.dl_type; 
+    memcpy(ofm->match.dl_src, flow.dl_src.octet, sizeof ofm->match.dl_src);
+    memcpy(ofm->match.dl_dst, flow.dl_dst.octet, sizeof ofm->match.dl_dst);
+    ofm->cookie = htonl(0);
+    ofm->command = htons(OFPFC_ADD);
+    ofm->buffer_id = htonl(buffer_id);
+    ofm->idle_timeout = htons(1);//htons(OFP_FLOW_PERMANENT);
+    ofm->hard_timeout = htons(1);//htons(OFP_FLOW_PERMANENT);
+    ofm->priority = htons(OFP_DEFAULT_PRIORITY);
+    ofm->flags = htons( OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP);
+    ofp_action_output& action_local = *((ofp_action_output*)(ofm->actions)); 
+    memset(&action_local, 0, sizeof(ofp_action_output));
+    action_local.type = htons(OFPAT_OUTPUT);
+    action_local.len = htons(sizeof(ofp_action_output));
+    action_local.port = 0; 
+    action_local.max_len = htons(2000);
+    send_openflow_command(pi.datapath_id, &ofm->header, true);
     return STOP;
   }
   
@@ -461,14 +447,14 @@ namespace vigil
       action.type = htons(OFPAT_OUTPUT);
       action.len = htons(sizeof(ofp_action_output));
       action.max_len = htons(2000);    
-      action.port = (dst_port == flow.in_port)?htons(OFPP_IN_PORT):dst_port; //dst_port); 
+      action.port = (dst_port == flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port); //dst_port); 
     } else {
       ofp_action_output& action = *((ofp_action_output*)(ofm->actions)); 
       memset(&action, 0, sizeof(ofp_action_output));
       action.type = htons(OFPAT_OUTPUT);
       action.len = htons(sizeof(ofp_action_output));
       action.max_len = htons(2000);    
-      action.port = (dst_port == flow.in_port)?htons(OFPP_IN_PORT):dst_port; //htons(OFPP_IN_PORT); //dst_port);
+      action.port = (dst_port == flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port); //htons(OFPP_IN_PORT); //dst_port);
     }
 
 
@@ -581,13 +567,13 @@ namespace vigil
       reply_msg_type = DHCPNAK;
     }
 
-    if((requested_ip != 0) && (send_ip != requested_ip) && 
-       (reply_msg_type == DHCPREQUEST) ) {
-      struct in_addr in;
-      in.s_addr = send_ip;
-      printf("DHCPREQUEST but send_ip %s different from requested %d\n", inet_ntoa(in));
-      reply_msg_type = DHCPNACK;
-    }
+    // if((requested_ip != 0) && (send_ip != requested_ip) && 
+    //    (reply_msg_type == DHCPREQUEST) ) {
+    //   struct in_addr in;
+    //   in.s_addr = send_ip;
+    //   printf("DHCPREQUEST but send_ip %s different from requested %d\n", inet_ntoa(in));
+    //   reply_msg_type = DHCPNCK;
+    // }
     size_t len = generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, 
 				     ntohl((uint32_t)send_ip), reply_msg_type, 
 				     is_routable?MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
@@ -1023,9 +1009,12 @@ generate_openflow_dhcp_flow(ofp_flow_mod* ofm, size_t size) {
   ofm->header.version = OFP_VERSION;
   ofm->header.type = OFPT_FLOW_MOD;
   ofm->header.length = htons(size);
-  ofm->match.wildcards = htonl(OFPFW_IN_PORT |  OFPFW_DL_VLAN | 
+  ofm->match.wildcards = htonl(OFPFW_IN_PORT | OFPFW_DL_VLAN | 
 			       OFPFW_DL_VLAN_PCP | OFPFW_NW_TOS |  OFPFW_DL_SRC |  
-			       OFPFW_DL_DST | OFPFW_NW_SRC_ALL | OFPFW_NW_DST_ALL);
+			       OFPFW_DL_DST | (OFPFW_NW_SRC_ALL) | (OFPFW_NW_DST_ALL));
+
+  printf("netmask : %lX\n", ofm->match.wildcards);
+  
   ofm->match.dl_type = htons(0x0800);
   //ofm->match.nw_src = inet_addr("0.0.0.0");
   //ofm->match.nw_dst =  inet_addr("255.255.255.255");

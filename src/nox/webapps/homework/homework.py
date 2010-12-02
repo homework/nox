@@ -146,12 +146,12 @@ def datapath_join(dpid, attrs):
     #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
     #     Actions.flood_and_process,
     #     )
-    Homework.install_datapath_flow(
-        dpid,
-        { core.DL_TYPE: EAPOL_TYPE, },
-        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        Actions.flood_and_process,
-        )
+#    Homework.install_datapath_flow(
+#        dpid,
+#        { core.DL_TYPE: EAPOL_TYPE, },
+#        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+#        Actions.flood_and_process,
+#        )
 
     # pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE, }
     # for eaddr, ipaddrs in Homework.st['permitted'].items():
@@ -185,7 +185,7 @@ def permit(eaddr, ipaddr=None):
         old_ipaddrs = Homework.st['permitted'].get(eaddr)
         Homework.st['permitted'][eaddr] = None
 
-    for dpid in Homework.st['ports']:
+#    for dpid in Homework.st['ports']:
         ## permit the forward path to this eaddr/ipaddr
         # Homework.install_datapath_flow(
         #     dpid, pattern,
@@ -194,11 +194,11 @@ def permit(eaddr, ipaddr=None):
         #     )
 
         ## ...and the reverse path similarly
-        del pattern[core.DL_SRC]
-        pattern[core.DL_DST] = eaddr
-        if ipaddr:
-            del pattern[core.NW_SRC]
-            pattern[core.NW_DST] = ipaddr
+        # del pattern[core.DL_SRC]
+        # pattern[core.DL_DST] = eaddr
+        # if ipaddr:
+        #     del pattern[core.NW_SRC]
+        #     pattern[core.NW_DST] = ipaddr
         
         # Homework.install_datapath_flow(
         #     dpid, pattern,
