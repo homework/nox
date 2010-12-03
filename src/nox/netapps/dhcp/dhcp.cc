@@ -23,8 +23,6 @@
 #include "netinet++/ipaddr.hh"
 #include "dhcp_mapping.hh"
 
-//#include "local_addr.hh"
-
 #define BRIDGE_INTERFACE_NAME "br0"
 
 #define MAX_ROUTABLE_LEASE_DURATION 1800
@@ -52,7 +50,6 @@ inline void generate_openflow_dhcp_flow(ofp_flow_mod* ofm, size_t size);
 namespace vigil
 {
   static Vlog_module lg("dhcp");
-
 
   /////////////////////////////////////
   //   module configuration 
@@ -117,8 +114,6 @@ namespace vigil
     close(s);
   }
 
-
-  
   void dhcp::install() {
     lg.dbg(" Install called ");
     //register_handler<Packet_in_event>(boost::bind(&dhcp::packet_in_handler, this, _1));
@@ -265,11 +260,12 @@ namespace vigil
     // so that you can always control what is going on in the net.
     const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
     Flow flow(pi.in_port, *(pi.get_buffer()));
-    printf("eap received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
+    printf("pae received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
     	   flow.dl_type , flow.nw_proto);
     
+    //this should check the mac vector
     if(flow.dl_src == ethernetaddr("00:25:d3:72:b5:1e")) {
-      printf("Skipping eap packet from 00:25:d3:72:b5:1e\n");
+      printf("Skipping pae packet from 00:25:d3:72:b5:1e\n");
       return STOP;
     }
     
@@ -465,14 +461,6 @@ namespace vigil
   Disposition dhcp::dhcp_handler(const Event& e) {
     const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
     Flow flow(pi.in_port, *(pi.get_buffer()));
-    //printf("dhcp received: %s(type:%x, proto:%x)\n", pi.get_name().c_str(), 
-    //	   flow.dl_type , flow.nw_proto);
-
-    // if((flow.dl_type != 0x0008) ||             //packet is ethernet
-    //    (flow.nw_proto != 17)               //packet is UDP
-    //    ) {                 
-    //   return CONTINUE;
-    // } 
 
     // for some reason events are only fired for this action when nox 
     // sees udp traffic. 
@@ -521,10 +509,6 @@ namespace vigil
     while(data_len > 2) {
       uint8_t dhcp_option = data[pointer];
       uint8_t dhcp_option_len = data[pointer+1];
-      //printf("pointer:%d, cookie:%llx, option %02x, len:%02x, option %02x, len:%02x\n", 
-      //pointer,(long long unsigned int)dhcp->cookie, data[pointer], data[pointer+1], 
-      // dhcp_option, dhcp_option_len);
-      
       
       if(dhcp_option == 0xff) {
       	printf("Got end of options!!!!\n");
@@ -540,8 +524,7 @@ namespace vigil
 	struct in_addr in;
 	in.s_addr = requested_ip;
 	printf("requested ip : %s\n", inet_ntoa(in));
-	//printf("dhcp msg type : %s\n", dhcp_msg_type_name[dhcp_msg_type]);
-	}
+      }
     
       data_len -=(2 + dhcp_option_len );
       pointer +=(2 + dhcp_option_len );
@@ -566,18 +549,10 @@ namespace vigil
       printf("DHCPNACK: requested ip differ from send_ip %s\n", inet_ntoa(in));
       reply_msg_type = DHCPNAK;
     }
-
-    // if((requested_ip != 0) && (send_ip != requested_ip) && 
-    //    (reply_msg_type == DHCPREQUEST) ) {
-    //   struct in_addr in;
-    //   in.s_addr = send_ip;
-    //   printf("DHCPREQUEST but send_ip %s different from requested %d\n", inet_ntoa(in));
-    //   reply_msg_type = DHCPNCK;
-    // }
     size_t len = generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, 
 				     ntohl((uint32_t)send_ip), reply_msg_type, 
 				     is_routable?MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
-
+    
     send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
 			 OFPP_IN_PORT, pi.in_port, 1);
     return STOP;
@@ -729,6 +704,14 @@ namespace vigil
   bool 
   dhcp::check_access(const ethernetaddr& ether) {
     return this->p_dhcp_proxy->is_ether_addr_routable(ether);
+  }
+
+  void 
+  dhcp::blacklist_mac(const ethernetaddr& ether) {
+    //add element in the vector 
+
+    //send command to delete flow from cache
+    
   }
 
   void 

@@ -160,11 +160,35 @@ struct arphdr {
      */
     Disposition datapath_leave_handler(const Event& e);
     
+    /**
+     * return a simple hello string in order to test the connectivity
+     * with the python code
+     */
     std::string hello_world();
-    std::vector<std::string> get_dhcp_mapping(); 
-    void register_proxy(applications::dhcp_proxy  *proxy);
 
+    /**
+     * a method to get the current dhcp mappings.
+     *
+     * \return a vector of string that describe each mapping.
+     */
+    std::vector<std::string> get_dhcp_mapping(); 
+
+    /**
+     * register the proxy class between the c++ module and the python module. 
+     * useful in order to have bidirectional communication.
+     */
+    void register_proxy(applications::dhcp_proxy  *proxy);
+    
+    /**
+     * a method to revoke the right to a host with the specific ethernet address
+     * to connect to the network. 
+     */
     void revoke_mac_access(const ethernetaddr& ether); 
+
+    /**
+     * a methos to revoke access to a host on the level of the physical layer. 
+     */
+    void blacklist_mac(ethernetaddr& ether);
   private:
     size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
 			       uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 
@@ -183,16 +207,20 @@ struct arphdr {
     //datapath storage
     std::vector<datapathid*> registered_datapath;
 
+    //store blacklisted mac addresses -> this might need to persist over reboots.
+    std::vector<ethernetaddr> mac_blacklist;
+
     //storage of the ip to mac translation throught the dhcp protocol 
     std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
     std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
 
+    //the mac address of the bridge
     ethernetaddr bridge_mac;
 
     //netlink control  
-    struct nl_sock *sk;              //
-    int ifindex;                              //index of the interface. TODO: not sure if this change if 
-                                                    // interfaces go up and down. 
+    struct nl_sock *sk;        //the socket to talk to netlink
+    int ifindex;               //index of the interface. TODO: not sure if this change if 
+                               // interfaces go up and down. 
 
   };
 }
