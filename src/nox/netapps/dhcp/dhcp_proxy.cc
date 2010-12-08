@@ -84,6 +84,21 @@ namespace vigil {
     dhcp_proxy::revoke_ether_addr(ethernetaddr ether) {
       this->p_dhcp->revoke_mac_access(ether);
     }
+  
+    void
+    dhcp_proxy::blacklist_mac_addr(ethernetaddr ether) {
+      this->p_dhcp->blacklist_mac(ether);
+    }
+  
+    void
+    dhcp_proxy::whitelist_mac_addr(ethernetaddr ether) {
+      this->p_dhcp->whitelist_mac(ether);
+    }
+  
+    std::vector<std::string> 
+    dhcp_proxy::get_blacklist_status() {
+      return (std::vector<std::string>)this->p_dhcp->get_blacklist_status();
+    }
     
   } // namespace applications
 } // namespace vigil

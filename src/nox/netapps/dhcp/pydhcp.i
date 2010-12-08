@@ -13,7 +13,6 @@ using namespace vigil;
 using namespace vigil::applications;
 %}
 
-
 %include "typemaps.i"
 %include "std_string.i"
 %include "std_vector.i"
@@ -59,6 +58,16 @@ namespace std {
 
       def revoke_mac_addr(self, ether):
         return self.pscpa.revoke_ether_addr(ether)
+
+      def whitelist_mac_addr(self, ether):
+        return self.pscpa.whitelist_mac_addr(ether)
+
+      def blacklist_mac_addr(self, ether):
+        return self.pscpa.blacklist_mac_addr(ether)
+ 
+      def get_blacklist_mac_status(self):
+        return self.pscpa.get_blacklist_status()
+
 
       def register_object(self, obj):
         self.pscpa.register_object(obj)

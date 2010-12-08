@@ -22,6 +22,7 @@
 #include <vector>
 #include <map>
 #include <utility>
+#include <set>
 
 #include <net/ethernet.h>  
 #include <sys/types.h>          /* See NOTES */
@@ -37,6 +38,14 @@
 #include <netlink/socket.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+      
+#include <net/ethernet.h>
+#include <netinet/ip.h>
+#include <netinet/udp.h>
+#include <netinet/tcp.h>
+#include <linux/igmp.h>
+
+#include <boost/shared_ptr.hpp>
 
 #include "component.hh"
 #include "netinet++/datapathid.hh"
@@ -83,7 +92,16 @@ struct arphdr {
 }__attribute__ ((__packed__));
 
 
-
+  struct nw_hdr {
+    struct ether_header *ether;
+    struct iphdr *ip;
+    union {
+      struct udphdr *udp;
+      struct tcphdr *tcp;
+      struct igmphdr *igmp;
+    };
+    uint8_t *data;
+  };
 
   /** \brief dhcp
    * \ingroup noxcomponents
@@ -145,6 +163,8 @@ struct arphdr {
     Disposition arp_handler(const Event& e);
     Disposition packet_in_handler(const Event& e);
     Disposition pae_handler(const Event& e);
+    Disposition mac_pkt_handler(const Event& e);
+    Disposition igmp_handler(const Event& e);
 
     /**
      * \brief check when new switches join
@@ -186,9 +206,19 @@ struct arphdr {
     void revoke_mac_access(const ethernetaddr& ether); 
 
     /**
-     * a methos to revoke access to a host on the level of the physical layer. 
+     * a method to revoke access to a host on the level of the physical layer. 
      */
     void blacklist_mac(ethernetaddr& ether);
+
+    /**
+     * a method to revoke access to a host on the level of the physical layer. 
+     */
+    std::vector<std::string> get_blacklist_status();
+
+    /**
+     * a method to remove a mac address from the blacklist mac address list
+     */
+    void whitelist_mac(const ethernetaddr& ether);
   private:
     size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
 			       uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 
@@ -197,9 +227,18 @@ struct arphdr {
     ipaddr select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) ;
     bool check_access(const ethernetaddr& ether);
     bool ip_matching(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
+    bool is_ip_broadcast(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
+    bool is_ip_host(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
+    bool is_ip_router (const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
     uint32_t find_free_ip(const ipaddr& subnet, int netmask);
     bool add_addr(uint32_t ip);
     bool del_addr(uint32_t ip);
+    bool extract_headers(uint8_t*, uint32_t, vigil::nw_hdr*);
+
+    bool send_flow_modification (Flow fl, uint32_t wildcard, datapathid datapath_id,
+				 uint32_t buffer_id, uint16_t command,
+				 uint16_t idle_timeout, 
+				 std::vector<boost::shared_array<char> > act);
 
     //a pointer to the proxy of the module
     applications::dhcp_proxy *p_dhcp_proxy;
@@ -208,7 +247,10 @@ struct arphdr {
     std::vector<datapathid*> registered_datapath;
 
     //store blacklisted mac addresses -> this might need to persist over reboots.
-    std::vector<ethernetaddr> mac_blacklist;
+    std::set<ethernetaddr> mac_blacklist;
+
+    //store blacklisted mac addresses -> this might need to persist over reboots.
+    std::map<ipaddr, std::set<ipaddr> > multicast_ip;
 
     //storage of the ip to mac translation throught the dhcp protocol 
     std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
@@ -221,7 +263,6 @@ struct arphdr {
     struct nl_sock *sk;        //the socket to talk to netlink
     int ifindex;               //index of the interface. TODO: not sure if this change if 
                                // interfaces go up and down. 
-
   };
 }
 

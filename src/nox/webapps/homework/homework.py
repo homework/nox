@@ -224,15 +224,6 @@ def deny(eaddr, ipaddr):
     if not (eaddr or ipaddr): return 
     
     eaddr = util.convert_to_eaddr(eaddr)
-    pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE,
-                core.DL_SRC: eaddr,
-                }
-    for dpid in Homework.st['ports']:
-        #Homework.delete_strict_datapath_flow(dpid, pattern)
-        ## ...and the reverse path similarly
-        del pattern[core.DL_SRC]
-        pattern[core.DL_DST] = eaddr
-        #Homework.delete_strict_datapath_flow(dpid, pattern)
     if eaddr in Homework.st['permitted']:
         del Homework.st['permitted'][eaddr]
     data = Homework._dhcp.revoke_mac_addr(eaddr)
@@ -267,6 +258,29 @@ def ws_dhcp_status(request, args):
     """ Get a copy of the current assignment of ip addresses to mac addresses. """
     data = Homework._dhcp.get_dhcp_mapping()
     return json.dumps(data)  
+
+def ws_whitelist_eth(request, args):
+    """ Remove a mac address from filtering eap traffic. """
+    eaddr = args.get('eaddr')
+    if not eaddr: return webservice.badRequest(request, "missing eaddr")
+    eaddr = util.convert_to_eaddr(eaddr)
+    data = Homework._dhcp.whitelist_mac_addr(eaddr)
+    return json.dumps(Homework._dhcp.get_blacklist_mac_status())
+
+def ws_blacklist_eth(request, args):
+    """ Aggressive mac address exclusion at the level of wpa connectivity. """
+    eaddr = args.get('eaddr')
+    if not eaddr: return webservice.badRequest(request, "missing eaddr")
+    eaddr = util.convert_to_eaddr(eaddr)
+    if eaddr in Homework.st['permitted']:
+        del Homework.st['permitted'][eaddr]
+        Homework._dhcp.revoke_mac_addr(eaddr)
+    Homework._dhcp.blacklist_mac_addr(eaddr)
+    return json.dumps(Homework._dhcp.get_blacklist_mac_status())
+
+def ws_blacklist_status(request, args):
+    """ get a list of mac addresses in the blacklist list. """
+    return  json.dumps(Homework._dhcp.get_blacklist_mac_status())
 
 ##
 ## main
@@ -331,6 +345,16 @@ class homework(core.Component):
         dhcpp = webservice.WSPathStaticString("dhcp_status")
         dhcp_status_path = (homeworkp, dhcpp,)
         v1.register_request(ws_dhcp_status, "GET", dhcp_status_path, """Status of dhcp assignments.""")
+
+        dhcpp = webservice.WSPathStaticString("blacklist")
+        blacklist_eth_path = (homeworkp, dhcpp, WSPathEthAddress(),)
+        v1.register_request(ws_blacklist_eth, "GET", blacklist_eth_path, """Forbid a mac address from connecting on the wpa level.""")
+        dhcpp = webservice.WSPathStaticString("whitelist")
+        whitelist_eth_path = (homeworkp, dhcpp, WSPathEthAddress(),)
+        v1.register_request(ws_whitelist_eth, "GET", whitelist_eth_path, """Allow a mac address to connect at the wpa level.""")
+        dhcpp = webservice.WSPathStaticString("blacklist_status")
+        blacklist_status_path = (homeworkp, dhcpp, )
+        v1.register_request(ws_blacklist_status, "GET", blacklist_status_path, """List of blacklisted mac addresses.""")
         
     def getInterface(self): return str(homework)
 

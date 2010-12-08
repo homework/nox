@@ -25,6 +25,10 @@ namespace vigil {
       std::vector<std::string> get_mapping();
       bool is_ether_addr_routable(ethernetaddr ether);
       void revoke_ether_addr(ethernetaddr ether);
+
+      void blacklist_mac_addr(ethernetaddr ether);
+      void whitelist_mac_addr(ethernetaddr ether);
+      std::vector<std::string> get_blacklist_status();
       
     protected:   
       dhcp* p_dhcp;
