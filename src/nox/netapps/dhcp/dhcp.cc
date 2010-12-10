@@ -167,14 +167,14 @@ namespace vigil
     flow.tp_src = htons(68);
     flow.tp_dst = htons(67);  
     this->send_flow_modification (flow, wildcard, pi.datapath_id,
-				  -1,OFP_FLOW_PERMANENT, OFPFC_ADD, act);
+				  -1, OFPFC_ADD, OFP_FLOW_PERMANENT, act);
 
     //force to forward igmp traffic to controller. 
     flow.dl_type = ethernet::IP;
     flow.nw_proto = ip_::proto::IGMP;
     wildcard = ~(OFPFW_DL_TYPE | OFPFW_NW_PROTO);   
     this->send_flow_modification (flow, wildcard, pi.datapath_id,
-				  -1,OFP_FLOW_PERMANENT, OFPFC_ADD, act);
+				  -1, OFPFC_ADD,OFP_FLOW_PERMANENT, act);
     return CONTINUE;
   }
 
@@ -217,7 +217,7 @@ namespace vigil
     ofp_act_out->max_len = htons(2000);
 
     this->send_flow_modification (flow, wildcard, pi.datapath_id,
-				  pi.buffer_id, OFP_FLOW_PERMANENT, OFPFC_ADD, act);
+				  pi.buffer_id, OFPFC_ADD, OFP_FLOW_PERMANENT, act);
     return STOP;
   }
 
@@ -270,7 +270,7 @@ namespace vigil
       uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_VLAN | OFPFW_DL_SRC | 
 			     OFPFW_DL_DST | OFPFW_DL_TYPE);
       this->send_flow_modification (flow, wildcard, pi.datapath_id,
-				    pi.buffer_id, 30, OFPFC_ADD, act);
+				    pi.buffer_id, OFPFC_ADD, 30, act);
     } else if(flow.dl_dst == this->bridge_mac) {
       boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
       act.push_back(ofp_out);
@@ -282,7 +282,7 @@ namespace vigil
       uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_VLAN | OFPFW_DL_SRC | 
 			     OFPFW_DL_DST | OFPFW_DL_TYPE);
       this->send_flow_modification (flow, wildcard, pi.datapath_id,
-				    pi.buffer_id, 30, OFPFC_ADD, act);
+				    pi.buffer_id, OFPFC_ADD, 30, act);
     } if(flow.dl_dst == ethernetaddr(ethbroadcast)) {
       boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
       act.push_back(ofp_out);
@@ -299,7 +299,7 @@ namespace vigil
       uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_VLAN | OFPFW_DL_SRC | 
 			     OFPFW_DL_DST | OFPFW_DL_TYPE);
       this->send_flow_modification (flow, wildcard, pi.datapath_id,
-				    pi.buffer_id, 30, OFPFC_ADD, act);
+				    pi.buffer_id, OFPFC_ADD, 30, act);
     } else {
       printf("mac pkt %s->%s can't be delivered\n", 
 	     flow.dl_src.string().c_str(), flow.dl_dst.string().c_str());
@@ -351,7 +351,6 @@ namespace vigil
 	}
       }   
     }
-
     return STOP;
   }
 
@@ -385,7 +384,7 @@ namespace vigil
     ofp_act_out->max_len = htons(2000);
 
     this->send_flow_modification (flow, wildcard, pi.datapath_id, pi.buffer_id, 
-				  OFP_FLOW_PERMANENT, OFPFC_ADD, act);
+				  OFPFC_ADD,OFP_FLOW_PERMANENT, act);
     
     return STOP;
   }
@@ -420,6 +419,13 @@ namespace vigil
       return STOP;
     }
 
+    //check if src ip is routable and the src mac address is permitted.
+    if( (flow.dl_src != this->bridge_mac) && 
+       (!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) ) {
+      printf("MAC address %s is not permitted to send data\n", flow.dl_src.string().c_str());
+      return STOP;
+    }
+    
     //check if dst ip is routable and we have a mac address for it.
     if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, 
 		   ipaddr(ntohl(flow.nw_dst))) ) {
@@ -427,20 +433,11 @@ namespace vigil
       return STOP;
     }
 
-    //check if src ip is routable and the src mac address is permitted.
-    if( (flow.dl_src != this->bridge_mac) && 
-       (!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) ) {
-      printf("MAC address %s is not permitted to send data\n", flow.dl_src.string().c_str());
-      return STOP;
-    }
-
     // find state for source - in case the address comes 
     // from the server ignore state rquirement. 
     is_src_local = ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_src)));
 
-    if (this->is_ip_host(ipaddr(ROUTABLE_SUBNET), 30, 
-			 ipaddr(ntohl(flow.nw_src))) {
-
+    if ( (ntohl(flow.nw_src)&0x3) == 1) {
       if((this->mac_mapping.find(flow.dl_src) == this->mac_mapping.end())  || 
 	 ((src_state = this->mac_mapping[flow.dl_src]) == NULL) ){
 	printf("No state found for source mac\n");
@@ -454,27 +451,75 @@ namespace vigil
       printf("received packet from unrecorded mac. discarding\n");
       return STOP;
     }
-
+    
+    
+    //check if destination ip is multicast and flood network in this case
+    if(ip_matching(ipaddr(MULTICAST_SUBNET), MULTICAST_NETMASK, 
+		   ipaddr(ntohl(flow.nw_dst))) ) {
+      if(this-> multicast_ip.find(flow.nw_dst) != this-> multicast_ip.end()) {
+	boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
+	act.push_back(ofp_out);
+	ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+	ofp_act_out->type = htons(OFPAT_OUTPUT);
+	ofp_act_out->len = htons(sizeof(struct ofp_action_output));
+	ofp_act_out->port = htons(OFPP_IN_PORT); 
+	ofp_act_out->max_len = htons(2000);
+	ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
+	ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+	memcpy(ofp_act_out, act[0].get(), sizeof(struct ofp_action_output));
+	act.push_back(ofp_out);
+	ofp_act_out->port = htons(OFPP_ALL); 
+	uint32_t wildcard = 0;
+	this->send_flow_modification (flow, wildcard, pi.datapath_id,
+				      pi.buffer_id, OFPFC_ADD, 30, act);
+	printf("Flood multicast packets\n");
+      }
+      return STOP;
+    }
+    
+    //check if destination ip is broadcasr and flood network in this case
+    //with a longer broadcast ip
+    if(ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, 
+		   ipaddr(ntohl(flow.nw_dst))) && ((ntohl(flow.nw_dst) & 0x3) == 0x3)) {
+      boost::shared_array<char> ofp_out(new char[sizeof(struct  ofp_action_nw_addr)]);
+      act.push_back(ofp_out);
+      ofp_action_nw_addr *nw_addr=(struct  ofp_action_nw_addr *)ofp_out.get();
+      nw_addr->type = htons(OFPAT_SET_NW_DST);
+      nw_addr->len = htons(sizeof(struct ofp_action_nw_addr ));
+      nw_addr->nw_addr = inet_addr("10.2.255.255"); 
+      //      ofp_act_out->max_len = htons(2000);
+      ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
+      ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+      memcpy(ofp_act_out, act[0].get(), sizeof(struct ofp_action_output));
+      act.push_back(ofp_out);
+      ofp_act_out->port = (flow.in_port == 0)?htons(OFPP_IN_PORT):0; 
+      uint32_t wildcard = 0;
+      this->send_flow_modification(flow, wildcard, pi.datapath_id,
+				    pi.buffer_id, OFPFC_ADD, 30, act);
+      printf("Broadcast packet detected\n");
+      return STOP;
+    }
 
     //checkin proper output port by checkin the dst mac and ip
-    if(this->is_ip_host(ipaddr(ROUTABLE_SUBNET), 30, ipaddr(ntohl(flow.nw_dst))) ) {
+    if(this->ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, 
+			ipaddr(ntohl(flow.nw_dst))) ) {
       //destination is local
-
-
       //required assumption for  packet destined to the bridged intf. 
       if((flow.dl_dst == this->bridge_mac) && 
 	 (this->ip_mapping.find(ipaddr(htonl(flow.nw_dst) - 1)) != this->ip_mapping.end())) {
+
 	dst_port = 0;
-	//reuired properties for a packet to be destined to one of the internal hosts.
+	//required properties for a packet to be destined to one of the internal hosts.
       } else if ( (this->ip_mapping.find(ipaddr(ntohl(flow.nw_dst))) != this->ip_mapping.end()) ) {
 	//output to port 1
+	printf("packet destined to port 1\n");
 	dst_port = 1;
       } else {
-	printf("destination mac and ip where incorrect.\n");
 	return STOP;
       }
-    } else 
+    } else {
       dst_port = 0;
+    }
 
     is_dst_local = ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_dst)));
     if(is_dst_local && is_src_local && (dst_port != 0) && (!is_src_router)) {
@@ -512,7 +557,7 @@ namespace vigil
       ofp_act_out->port = (dst_port==flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port);
     }
     this->send_flow_modification (flow, wildcard, pi.datapath_id,
-				  pi.buffer_id, 30, OFPFC_ADD, act);
+				  pi.buffer_id, OFPFC_ADD, 30, act);
     return STOP;
   }
   
@@ -532,30 +577,18 @@ namespace vigil
     int32_t data_len = pi.get_buffer()->size();
     int pointer = 0;
 
-    if(data_len < sizeof( struct ether_header))
-      return CONTINUE;
-    
-    // parse ethernet header
-    struct ether_header *ether = (struct ether_header *) data;
-    pointer += sizeof( struct ether_header);
-    data_len -=  sizeof( struct ether_header);
-    
-    // parse ip header
-    if(data_len < sizeof(struct iphdr))
-      return CONTINUE;
-    struct iphdr *ip = (struct iphdr *) (data + pointer);
-    if(data_len < ip->ihl*4) 
-      return CONTINUE;
-    pointer += ip->ihl*4;
-    data_len -= ip->ihl*4;
+    struct nw_hdr hdr;
+    if(!this->extract_headers(data, data_len, &hdr)) {
+      printf("malformed dhcp packet \n");
+    }
+    uint16_t dhcp_len = ntohs(hdr.udp->len) - sizeof(struct udphdr);
 
-    //parse udp header
-    struct udphdr *udp = (struct udphdr *)(data + pointer);
-    pointer += sizeof(struct udphdr);
-    data_len -= sizeof(struct udphdr);
-    uint16_t dhcp_len = ntohs(udp->len) - sizeof(struct udphdr);
+    printf("header size:%d\n",  (hdr.data - data));
+
+    pointer = (hdr.data - data);
+    data_len -= (hdr.data - data);
     
-    struct dhcp_packet *dhcp = (struct dhcp_packet  *)(data + pointer);
+    struct dhcp_packet *dhcp = (struct dhcp_packet  *)hdr.data;
 
     //analyse options and reply respectively.
     data_len -= sizeof(struct dhcp_packet);
@@ -588,8 +621,9 @@ namespace vigil
       pointer +=(2 + dhcp_option_len );
     }
     //Must create a fucntion that chooses this ip for the state of the DHCP server. 
-    ipaddr send_ip = this->select_ip(ethernetaddr(ether->ether_shost), dhcp_msg_type);
-    bool is_routable =this->ip_matching(ipaddr(ROUTABLE_SUBNET),ROUTABLE_NETMASK, ntohl((uint32_t)send_ip));
+    ipaddr send_ip = this->select_ip(ethernetaddr(hdr.ether->ether_shost), dhcp_msg_type, 
+				     ntohl(requested_ip));
+    bool is_routable =(this->ip_matching(ipaddr(ROUTABLE_SUBNET),ROUTABLE_NETMASK, ntohl((uint32_t)send_ip)) || (this->ip_matching(ipaddr(INIT_SUBNET),INIT_NETMASK, ntohl((uint32_t)send_ip))));
 
     //TODO: if ip is routable, add ip to the interface
     if(is_routable) {
@@ -677,7 +711,7 @@ namespace vigil
   }
 
   ipaddr 
-  dhcp::select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) {
+  dhcp::select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type, uint32_t requested_ip) {
     map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter_ether;
     struct dhcp_mapping *state;
     bool is_routable;
@@ -705,8 +739,10 @@ namespace vigil
       //printf("found mapping for addr %s -> %s\n", ether.string().c_str(), 
       //state->string().c_str());
       //check if the ip is routable and if the web service agrees on that. 
-      if(!ip_matching(ipaddr((is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET)), 
-		     ((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) {
+      if( (!ip_matching(ipaddr((is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET)), 
+		     ((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) ||
+	  ((state->state==DHCP_STATE_FINAL) 
+	   && ip_matching(ipaddr(INIT_SUBNET), INIT_NETMASK, state->ip) ) ) {
 	printf("ip assingment is invalid!\n");	
 
 	//remove old mapping
@@ -722,16 +758,20 @@ namespace vigil
 
 	printf("lease end: %ld %ld\n",  tv.tv_sec, lease_end);
 	ip++;
-	state = new dhcp_mapping(ipaddr(ip), ether, lease_end);
+	state = new dhcp_mapping(ipaddr(ip), ether, lease_end, DHCP_STATE_FINAL);
 	//printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
 	//state->string().c_str());
 	this->mac_mapping[ether] = state;
 	this->ip_mapping[ipaddr(ip)] = state;
       }
+      if(requested_ip == ntohl(state->ip))
+	state->state = DHCP_STATE_FINAL;
     } else {
       //check whether you might need to delete some old mapping on the ip map.
-      ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
-			is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
+      // ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
+      // 			is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
+      ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: INIT_SUBNET), 
+			is_routable? ROUTABLE_NETMASK: INIT_NETMASK);
       if(!ip) {
 	printf("run out of ip's - no reply\n");
 	return STOP;
@@ -740,7 +780,8 @@ namespace vigil
 
       //create state with new ip and send it out.
       printf("lease end:%ld %ld\n",  tv.tv_sec, lease_end);
-      state = new dhcp_mapping(ipaddr(ip), ether, lease_end);
+      state = new dhcp_mapping(ipaddr(ip), ether, lease_end, 
+			       is_routable?DHCP_STATE_INIT:DHCP_STATE_FINAL);
       //printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
       //	     state->string().c_str());
       this->mac_mapping[ether] = state;
@@ -1169,7 +1210,7 @@ namespace vigil
     //parse udp header
     if(hdr->ip->protocol == ip_::proto::UDP) {
       hdr->udp = (struct udphdr *)(data + pointer);
-      hdr->data = data + pointer + ntohs(hdr->udp->len);    
+      hdr->data = data + pointer + sizeof(struct udphdr);    
     } else if(hdr->ip->protocol == ip_::proto::TCP) {
       hdr->tcp = (struct tcphdr *)(data + pointer);
       hdr->data = data + pointer + (hdr->tcp->doff*4);

@@ -9,17 +9,23 @@
 namespace vigil {
   using namespace std;
 
+  enum {
+    DHCP_STATE_INIT,
+    DHCP_STATE_FINAL,
+  };
+
   struct dhcp_mapping {
     struct ipaddr ip;
     struct ethernetaddr mac;
     time_t lease_end;
+    uint8_t state;
     
     //------------------------------------------
     // constructor and distructors
     //------------------------------------------
     dhcp_mapping();
     //dhcp_mapping(const dhcp_mapping&);
-    dhcp_mapping(const  ipaddr&, const  ethernetaddr&, uint32_t lease_end);
+    dhcp_mapping(const  ipaddr&, const  ethernetaddr&, uint32_t lease_end, uint8_t state);
     ~dhcp_mapping() {};
 
     //------------------------------------------
@@ -39,10 +45,11 @@ namespace vigil {
     dhcp_mapping::dhcp_mapping() { ip = ipaddr(); mac = ethernetaddr(); lease_end = 0; }
     
     inline
-    dhcp_mapping::dhcp_mapping(const  ipaddr& _ip, const  ethernetaddr& _mac, uint32_t _lease_end) {
+    dhcp_mapping::dhcp_mapping(const  ipaddr& _ip, const  ethernetaddr& _mac, uint32_t _lease_end, uint8_t _state ) {
       ip = _ip;
       mac = _mac;
       lease_end = _lease_end;
+      state = _state;
     }
 
     std::string 

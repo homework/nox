@@ -224,7 +224,7 @@ struct arphdr {
 			       uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 
 			       uint8_t dhcp_msg_type, uint32_t lease);
     void refresh_default_flows();
-    ipaddr select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type) ;
+    ipaddr select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type, uint32_t requested_ip) ;
     bool check_access(const ethernetaddr& ether);
     bool ip_matching(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
     bool is_ip_broadcast(const ipaddr& subnet, uint32_t netmask,const ipaddr& ip);
