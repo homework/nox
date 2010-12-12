@@ -20,10 +20,12 @@ ppf = pprint.pprint
 import simplejson as json
 
 from nox.webapps.webservice import webservice
+from nox.coreapps.pyrt.pycomponent import Packet_in_event 
 from nox.lib import core, openflow, packet, util
 from nox.lib.packet import ethernet, ipv4
+from nox.coreapps.pyrt.pycomponent import CONTINUE, STOP
 
- Switch_Delay_Test = None
+Switch_Delay_Test = None
 
 EAPOL_TYPE = 0x888e
 EMPTY_JSON = "{}"
@@ -32,43 +34,30 @@ TICKER = 1
 ##
 ## utility functions
 ##
-    
-def invert_flow(flow):
-    """ Swap source and destination L2 and L3 addresses. """
-    s, d = flow['dl_src'], flow['dl_dst']
-    flow['dl_src'], flow['dl_dst'] = d, s
 
-    s, d = flow['nw_src'], flow['nw_dst']
-    flow['nw_src'], flow['nw_dst'] = d, s
-    
-    return flow
+class WSPathFlowNum(webservice.WSPathComponent):
+    def __init__(self):
+        webservice.WSPathComponent.__init__(self)
+        #self.userdb = userdb   # Keep ref to userdb for later use
 
-def is_valid_ip(ip):
-    """ Test if string is valid representation of IP address. """
-    quads = ip.split(".")
-    if len(quads) != 4: return False
+    def __str__(self):
+        return "flow_num"
 
-    try: return reduce(lambda acc,quad: (0 <= quad <= 255) and acc, map(int, quads), True)
-    except ValueError: return False
+    def extract(self, pc, data):
+        # check this is number
+        return webservice.WSPathExtractResult(pc)
 
-def is_valid_eth(eth):
-    """ Test if string is valid representation of Ethernet address. """
-    if ":" in eth: bytes = eth.split(":")
-    elif "-" in eth: bytes = eth.split("-")
-    else: return False ## else: bytes = [ eth[i:i+2] for i in range(0,len(eth),2) ]
+class WSPathFlowType(webservice.WSPathComponent):
+    def __init__(self):
+        webservice.WSPathComponent.__init__(self)
+        #self.userdb = userdb   # Keep ref to userdb for later use
 
-    if len(bytes) != 6: return False    
+    def __str__(self):
+        return "flow_type"
 
-    try: return reduce(lambda acc,byte: (0 <= byte <= 256) and acc,
-                       map(lambda b: int(b,16), bytes), True)
-    except ValueError: return False
-
-def ticker():
-    """ Placeholder ticker callback. """
-    now = time.time()
-    print "TICK", now
-     Switch_Delay_Test.post_callback(TICKER, ticker)
-    return True
+    def extract(self, pc, data):
+        # allow only a couple of values and check
+        return webservice.WSPathExtractResult(pc)
 
 ##
 ## openflow event handlers
@@ -76,7 +65,8 @@ def ticker():
     
 def datapath_join(dpid, attrs):
     """ Event handler for controller detection of live datapath (port). """
-     Switch_Delay_Test.st['ports'][dpid] = attrs['ports'][:]
+    print ("switch %s joined"%(dpid))
+    Switch_Delay_Test.st['ports'][dpid] = attrs['ports'][:]
     
 def datapath_leave(dpid):
     """ Event handler for controller detection of datapath going down. """
@@ -85,20 +75,51 @@ def datapath_leave(dpid):
 def handler(self):
     print "Found a packet on incoming port"
     return  CONTINUE
+
 ##
 ## Managment of web service 
-##
+##              
 
 #
-# curl -i -X POST -d 'json={"flow_num":10, "type":"wildcard", "wildcard":0}'  \
-#      http://localhost/ switch_delay_test/installflows
+#  curl -k -X GET https://localhost/ws.v1/switch_delay_test/installflows/10/wildcard
 #
 def ws_install_flows(request, args):
     """ WS interface to permit(). """
-    print args
-    
-    return "{result: success}"
+    print args  
+    if len(Switch_Delay_Test.st['ports']) < 1 :
+        return "{result:False, reason: \"No switch yet joinned\"}"
+ 
+    for dpid in Switch_Delay_Test.st['ports'].keys():
+        install_test_flows(dpid, args.get('flow_num'), args.get('flow_type'))
+ 
+    return "{flow_num: "+args.get('flow_num')+", flow_type: "+args.get('flow_type')+", }"
 
+
+def install_test_flows(dpid, num, type):
+
+    for i in range(int(num)):
+        Switch_Delay_Test.install_datapath_flow(dpid,
+        { 
+                core.IN_PORT: 1,
+                core.DL_SRC: "11:11:11:11:11:11",
+                core.DL_DST: "22:11:11:11:11:11",
+                core.DL_VLAN: 65535,
+                core.DL_VLAN_PCP: 0,
+                core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+                core.NW_SRC: "10.1.1.1",
+                core.NW_DST: "10.1.1.2",
+                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
+                core.NW_TOS: 0,
+                core.TP_SRC: 8080,
+                core.TP_DST:8080,
+                },
+        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+        [
+                [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]]
+         ],
+        )
+
+    return True
 
 ##
 ## main
@@ -110,7 +131,9 @@ class switch_delay_test(core.Component):
         core.Component.__init__(self, ctxt)
 
         global  Switch_Delay_Test
-         Switch_Delay_Test = self
+        Switch_Delay_Test = self
+        self.st = {}
+        self.st['ports']={}
 
     
     def install(self):
@@ -124,8 +147,9 @@ class switch_delay_test(core.Component):
         switch_delay_testp = webservice.WSPathStaticString("switch_delay_test")
 
         permitp = webservice.WSPathStaticString("installflows")
-        installflows = ( switch_delay_testp, permitp, WSPathEthAddress(),)
-        v1.register_request(ws_install_flows, "POST", installflows, 
+        installflows = ( switch_delay_testp, permitp, 
+                         WSPathFlowNum(), WSPathFlowType())
+        v1.register_request(ws_install_flows, "GET", installflows, 
                             "Send details about the installed flows for the test.")
         
     def getInterface(self): return str( switch_delay_test)
