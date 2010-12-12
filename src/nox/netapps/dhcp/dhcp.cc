@@ -222,7 +222,7 @@ namespace vigil
   }
 
   Disposition dhcp::mac_pkt_handler(const Event& e) {
-    printf("ethernet packet handled\n");
+    //printf("ethernet packet handled\n");
     std::vector<boost::shared_array<char> > act;
     struct ofp_action_output *ofp_act_out;
     const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
@@ -435,7 +435,7 @@ namespace vigil
 
     // find state for source - in case the address comes 
     // from the server ignore state rquirement. 
-    is_src_local = ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_src)));
+    is_src_local = ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_src))) || ip_matching(ipaddr(INIT_SUBNET), INIT_NETMASK, ipaddr(ntohl(flow.nw_src)));
 
     if ( (ntohl(flow.nw_src)&0x3) == 1) {
       if((this->mac_mapping.find(flow.dl_src) == this->mac_mapping.end())  || 
@@ -521,7 +521,7 @@ namespace vigil
       dst_port = 0;
     }
 
-    is_dst_local = ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_dst)));
+    is_dst_local = ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_dst))) || ip_matching(ipaddr(INIT_SUBNET), INIT_NETMASK, ipaddr(ntohl(flow.nw_dst)));
     if(is_dst_local && is_src_local && (dst_port != 0) && (!is_src_router)) {
       boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_dl_addr)]);
       act.push_back(ofp_out);
@@ -583,7 +583,7 @@ namespace vigil
     }
     uint16_t dhcp_len = ntohs(hdr.udp->len) - sizeof(struct udphdr);
 
-    printf("header size:%d\n",  (hdr.data - data));
+    //printf("header size:%d\n",  (hdr.data - data));
 
     pointer = (hdr.data - data);
     data_len -= (hdr.data - data);
@@ -602,7 +602,7 @@ namespace vigil
       uint8_t dhcp_option_len = data[pointer+1];
       
       if(dhcp_option == 0xff) {
-      	printf("Got end of options!!!!\n");
+      	//printf("Got end of options!!!!\n");
      	break;
       } else if(dhcp_option == 53) {
 	dhcp_msg_type = data[pointer + 2];
@@ -740,9 +740,8 @@ namespace vigil
       //state->string().c_str());
       //check if the ip is routable and if the web service agrees on that. 
       if( (!ip_matching(ipaddr((is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET)), 
-		     ((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) ||
-	  ((state->state==DHCP_STATE_FINAL) 
-	   && ip_matching(ipaddr(INIT_SUBNET), INIT_NETMASK, state->ip) ) ) {
+			((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) &&
+	  (state->state == DHCP_STATE_FINAL) ) {
 	printf("ip assingment is invalid!\n");	
 
 	//remove old mapping
@@ -764,7 +763,7 @@ namespace vigil
 	this->mac_mapping[ether] = state;
 	this->ip_mapping[ipaddr(ip)] = state;
       }
-      if(requested_ip == ntohl(state->ip))
+      if((requested_ip == ntohl(state->ip)) && (dhcp_msg_type == DHCPREQUEST))
 	state->state = DHCP_STATE_FINAL;
     } else {
       //check whether you might need to delete some old mapping on the ip map.
@@ -781,7 +780,7 @@ namespace vigil
       //create state with new ip and send it out.
       printf("lease end:%ld %ld\n",  tv.tv_sec, lease_end);
       state = new dhcp_mapping(ipaddr(ip), ether, lease_end, 
-			       is_routable?DHCP_STATE_INIT:DHCP_STATE_FINAL);
+			       is_routable?DHCP_STATE_FINAL:DHCP_STATE_INIT);
       //printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
       //	     state->string().c_str());
       this->mac_mapping[ether] = state;
