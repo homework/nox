@@ -27,10 +27,6 @@ from nox.coreapps.pyrt.pycomponent import CONTINUE, STOP
 
 Switch_Delay_Test = None
 
-EAPOL_TYPE = 0x888e
-EMPTY_JSON = "{}"
-TICKER = 1
-
 ##
 ## utility functions
 ##
@@ -87,17 +83,28 @@ def ws_install_flows(request, args):
     """ WS interface to permit(). """
     print args  
     if len(Switch_Delay_Test.st['ports']) < 1 :
-        return "{result:False, reason: \"No switch yet joinned\"}"
+        return "{\"result\":0, reason: \"No switch yet joinned\"}"
  
     for dpid in Switch_Delay_Test.st['ports'].keys():
-        install_test_flows(dpid, args.get('flow_num'), args.get('flow_type'))
- 
-    return "{flow_num: "+args.get('flow_num')+", flow_type: "+args.get('flow_type')+", }"
-
-
+        if not install_test_flows(dpid, args.get('flow_num'), args.get('flow_type')) :
+            return "{\"result\":0, reason: \"Invalid params\"}"
+    return "{\"result\":1}"
+    
 def install_test_flows(dpid, num, type):
-
+    j=1
+    wild= 0
     for i in range(int(num)):
+        if(type == "exact") :
+            dst_ip = ("1.1.%d.%d"%(int((i/256) + 1),i%256))
+            wild = 0
+        elif (type == "wildcard"):
+            dst_ip = ("1.%d.%d.0"%(int((i/256) + 1),i%256))
+            wild = 8
+        else :
+            print "Invalid type"
+            return False
+
+        print dst_ip
         Switch_Delay_Test.install_datapath_flow(dpid,
         { 
                 core.IN_PORT: 1,
@@ -107,15 +114,16 @@ def install_test_flows(dpid, num, type):
                 core.DL_VLAN_PCP: 0,
                 core.DL_TYPE: ethernet.ethernet.IP_TYPE,
                 core.NW_SRC: "10.1.1.1",
-                core.NW_DST: "10.1.1.2",
+                core.NW_DST: dst_ip,
+                core.NW_DST_N_WILD: wild,
                 core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
                 core.NW_TOS: 0,
                 core.TP_SRC: 8080,
                 core.TP_DST:8080,
-                },
+                }, 
         openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
         [
-                [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]]
+                [openflow.OFPAT_OUTPUT, [-1, 1]]
          ],
         )
 
