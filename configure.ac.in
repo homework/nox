@@ -77,6 +77,7 @@ ACI_PACKAGE([webapps],[misc ui apps],
                	miscws
                 homework
 		switch_delay_test
+		network_stack_test
                	#add webapps component here
 		],
                [TURN_ON_WEBAPPS])
