@@ -216,8 +216,32 @@ def ws_permit(request, args):
 
     ipaddr = args.get('ipaddr')
     return permit(eaddr, ipaddr)
+#
+# curl -i -k -X POST -H "Content-Type: application/json" \
+# -d "[\"11:11:11:11:11:11\",\"22:22:22:22:22:22\"]" \
+# https://10.1.0.1/ws.v1/homework/permit_group
+#
+def ws_permit_group(request, args):
+    """ WS interface to permit(). """
+    content = webservice.json_parse_message_body(request)
+    if content == None:
+        print "error in getting state"
+        return  webservice.badRequest(request, "missing eaddr")
 
-def deny(eaddr, ipaddr):
+    for eaddr in content:
+        if not is_valid_eth(eaddr):
+            return   webservice.badRequest(request, "malformed eaddr " + eaddr)
+
+    for eaddr in content:
+        permit(eaddr)
+    return status()
+
+#    eaddr = args.get('eaddr')
+#    if not eaddr: return webservice.badRequest(request, "missing eaddr")
+
+    return '{"status" : "success"}' #permit(eaddr)
+
+def deny(eaddr, ipaddr = None):
     """ Deny tx/rx to/from a specified Ethernet address. """
                                                             
     print "DENY", eaddr, ipaddr
@@ -237,6 +261,28 @@ def ws_deny(request, args):
     ipaddr = args.get('ipaddr')
 
     return deny(eaddr, ipaddr)
+
+#
+# curl -i -k -X POST -H "Content-Type: application/json" \
+# -d "[\"11:11:11:11:11:11\",\"22:22:22:22:22:22\"]" \
+# https://10.1.0.1/ws.v1/homework/permit_group
+#
+def ws_deny_group(request, args):
+    """ WS interface to permit(). """
+    content = webservice.json_parse_message_body(request)
+    if content == None:
+        print "error in getting state"
+        return  webservice.badRequest(request, "missing eaddr")
+
+    for eaddr in content:
+        if not is_valid_eth(eaddr):
+            return   webservice.badRequest(request, "malformed eaddr " + eaddr)
+
+    for eaddr in content:
+        deny(eaddr)
+    return status()
+
+
 
 def status(eaddr=None):
     """ Permit/Deny status of specified/all addresses. """
@@ -330,11 +376,21 @@ class homework(core.Component):
 ##         permit_ip_path = (homeworkp, permitp, WSPathEthAddress(), WSPathIPAddress(),)
 ##         v1.register_request(ws_permit, "POST", permit_ip_path, """Permit an IP address.""")
 
+        permit_groupp = webservice.WSPathStaticString("permit_group")
+        permit_group_eth_path = (homeworkp, permit_groupp)
+        v1.register_request(ws_permit_group, "POST", permit_group_eth_path, """Permit a set of  Ethernet addresses 
+represented as json array in the body of the http post.""")
+
         denyp = webservice.WSPathStaticString("deny")
         deny_eth_path = (homeworkp, denyp, WSPathEthAddress(),)
         v1.register_request(ws_deny, "POST", deny_eth_path, """Deny an Ethernet address.""")
 ##         deny_ip_path = (homeworkp, denyp, WSPathEthAddress(), WSPathIPAddress(),)
 ##         v1.register_request(ws_deny, "POST", deny_ip_path, """Deny an IP address.""")
+
+        deny_groupp = webservice.WSPathStaticString("deny_group")
+        deny_group_eth_path = (homeworkp, deny_groupp)
+        v1.register_request(ws_deny_group, "POST", deny_group_eth_path, """Deny access to a set of  Ethernet addresses 
+represented as json array in the body of the http post.""")
 
         statusp = webservice.WSPathStaticString("status")
         status_path = (homeworkp, statusp,)

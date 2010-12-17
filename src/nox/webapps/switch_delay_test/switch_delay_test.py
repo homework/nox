@@ -90,6 +90,19 @@ def ws_install_flows(request, args):
             return "{\"result\":0, \"reason\": \"Invalid params\"}"
 
     return "{\"result\":1}"
+#
+#  curl -i -k -X POST -H "Content-Type: application/json" -d "{\"hello\":\"world\"}" \
+#  https://10.1.0.1/ws.v1/switch_delay_test/test_http_body
+#
+def ws_test_http_body(request, data):
+    """ WS interface to permit(). """
+    content = webservice.json_parse_message_body(request)
+    if content == None:
+        print "error in getting state"
+        return webservice.NOT_DONE_YET
+    print content
+    print data
+    return "{\"result\":1}"
     
 def install_test_flows(dpid, num, type):
     j=1
@@ -183,6 +196,13 @@ class switch_delay_test(core.Component):
         installflows = ( switch_delay_testp, permitp, 
                          WSPathFlowNum(), WSPathFlowType())
         v1.register_request(ws_install_flows, "GET", installflows, 
+                            "Send details about the installed flows for the test.")
+
+        switch_delay_testp = webservice.WSPathStaticString("switch_delay_test")
+
+        bodyp = webservice.WSPathStaticString("test_http_body")
+        installflows = ( switch_delay_testp, bodyp)
+        v1.register_request(ws_test_http_body, "POST", installflows, 
                             "Send details about the installed flows for the test.")
         
     def getInterface(self): return str( switch_delay_test)
