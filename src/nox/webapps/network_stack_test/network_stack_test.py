@@ -151,6 +151,47 @@ def install_test_flows(dpid, num, type):
                 [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
          ],
         )
+
+        test.install_datapath_flow(dpid,
+        { 
+                core.IN_PORT: 1,
+                core.DL_SRC: dl_src,
+                core.DL_DST: "10:20:30:41:50:60",
+                core.DL_VLAN: 0xffff,
+                core.DL_VLAN_PCP: 0,
+                core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+                core.NW_SRC: nw_src,
+#                core.NW_DST: dst_ip,
+#                core.NW_DST_N_WILD: wild,
+                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
+                core.NW_TOS: 0,
+                core.TP_SRC: 8080,
+                core.TP_DST:8080,
+                }, 
+        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+        [
+                [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
+         ],
+        )
+
+        test.install_datapath_flow(dpid,
+        { 
+                core.IN_PORT: 1,
+                core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+#                core.NW_SRC: nw_src,
+                core.NW_DST: "10.3.0.0",
+                core.NW_DST_N_WILD: 16,
+#                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
+#                core.NW_TOS: 0,
+#                core.TP_SRC: 8080,
+#                core.TP_DST:8080,
+                }, 
+        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+        [
+                [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
+         ],
+        )
+
     return True
 
 ##
@@ -190,13 +231,26 @@ class network_stack_test(core.Component):
         else:
             print "bridge mac: "+self.bridge_mac
 
+        #
+        #clean up the br0 assigned ips
+        #
+        res = os.popen("ip addr show dev br0")
+        if res == None:
+            sys.exit(1)
+        
+        for line in res.readlines():
+            if re.search("inet (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2})", line) != None:
+                ip = re.search("inet (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2})", line).group(1)
+                print "removing ip " + ip + " from dev br0 "
+                os.system(("ip addr del %s dev br0"%(ip)));
+            
         match = {core.DL_TYPE: ethernet.ethernet.IP_TYPE}
 
         self.register_for_datapath_join(datapath_join)
         self.register_for_datapath_leave(datapath_leave)
         self.register_for_packet_match(lambda
             dp,inport,reason,len,bid,packet :
-            test.pkt_in_handler(self,dp,inport,reason,len,bid,packet),
+            network_stack_test.pkt_in_handler(self,dp,inport,reason,len,bid,packet),
             0xffff, match)
 
         ws = self.resolve(str(webservice.webservice))
