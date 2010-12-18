@@ -68,7 +68,7 @@ def datapath_join(dpid, attrs):
             core.DL_TYPE: ethernet.ethernet.IP_TYPE,
             core.NW_DST: "10.2.0.1",
             core.NW_PROTO: ipv4.ipv4.TCP_PROTOCOL,
-            core.TP_DST: 22,
+            core.TP_DST: 443,
             },openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
                                [
             [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
@@ -78,7 +78,7 @@ def datapath_join(dpid, attrs):
             core.DL_TYPE: ethernet.ethernet.IP_TYPE,
             core.NW_SRC: "10.2.0.1",
             core.NW_PROTO: ipv4.ipv4.TCP_PROTOCOL,
-            core.TP_SRC: 22,
+            core.TP_SRC: 443,
             },openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
                                [
             [openflow.OFPAT_OUTPUT, [-1, 1]]
@@ -89,7 +89,18 @@ def datapath_join(dpid, attrs):
             },openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
                                [
             [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_FLOOD]],
+            [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]],
             [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_IN_PORT]]
+            ],)
+
+    test.install_datapath_flow(dpid, { 
+            core.IN_PORT: 1,
+            core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+            core.NW_DST: "10.3.0.0",
+            core.NW_DST_N_WILD: 16,
+            }, openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+                               [
+            [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
             ],)
     print ("switch %s joined"%(dpid))
     test.st['ports'][dpid] = attrs['ports'][:]
@@ -112,88 +123,67 @@ def handler(pkt_in):
 def ws_install_flows(request, args):
     """ WS interface to permit(). """
     print args  
-    if len(network_stack_test.st['ports']) < 1 :
+    if len(test.st['ports']) < 1 :
         return "{\"result\":0, \"reason\": \"No switch yet joinned\"}"
  
-    for dpid in network_stack_test.st['ports'].keys():
-        if not install_test_flows(dpid, args.get('flow_num'), args.get('flow_type')) :
+    for dpid in test.st['ports'].keys():
+        if not install_test_flows(dpid, args.get('flow_num')) :
             return "{\"result\":0, \"reason\": \"Invalid params\"}"
 
     return "{\"result\":1}"
     
-def install_test_flows(dpid, num, type):
+def install_test_flows(dpid, num):
     j=1
     wild= 0
     for i in range(int(num)):
         i=i+1
-        nw_src = ("10.2.%d.%d"%(int((i/256)),i%256))
+        nw_src_host = ("10.2.%d.%d"%(int(i/64),((int(i%64)<<2)+2)))
+        nw_src_router = ("10.2.%d.%d"%(int(i/64),(int(i%64)<<2)+1))
         dl_src = ("10:20:30:40:%x:%x"%(int((i/256)),i%256))
 
-        print dst_ip
-        test.install_datapath_flow(dpid,
-        { 
+        # install flows to forward packets to bridge and back in order to do 
+        # the natting.
+        print  nw_src_host + " " + nw_src_router
+        test.install_datapath_flow(dpid,{ 
                 core.IN_PORT: 1,
                 core.DL_SRC: dl_src,
-                core.DL_DST: "10:20:30:41:50:60",
+                core.DL_DST: test.bridge_mac,
                 core.DL_VLAN: 0xffff,
                 core.DL_VLAN_PCP: 0,
                 core.DL_TYPE: ethernet.ethernet.IP_TYPE,
-                core.NW_SRC: nw_src,
-#                core.NW_DST: dst_ip,
-#                core.NW_DST_N_WILD: wild,
-                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
-                core.NW_TOS: 0,
-                core.TP_SRC: 8080,
-                core.TP_DST:8080,
-                }, 
-        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        [
-                [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
-         ],
-        )
-
-        test.install_datapath_flow(dpid,
-        { 
-                core.IN_PORT: 1,
-                core.DL_SRC: dl_src,
-                core.DL_DST: "10:20:30:41:50:60",
-                core.DL_VLAN: 0xffff,
-                core.DL_VLAN_PCP: 0,
-                core.DL_TYPE: ethernet.ethernet.IP_TYPE,
-                core.NW_SRC: nw_src,
-#                core.NW_DST: dst_ip,
-#                core.NW_DST_N_WILD: wild,
-                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
-                core.NW_TOS: 0,
-                core.TP_SRC: 8080,
-                core.TP_DST:8080,
-                }, 
-        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        [
-                [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
-         ],
-        )
-
-        test.install_datapath_flow(dpid,
-        { 
-                core.IN_PORT: 1,
-                core.DL_TYPE: ethernet.ethernet.IP_TYPE,
-#                core.NW_SRC: nw_src,
+                core.NW_SRC: nw_src_host,
                 core.NW_DST: "10.3.0.0",
                 core.NW_DST_N_WILD: 16,
-#                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
-#                core.NW_TOS: 0,
-#                core.TP_SRC: 8080,
-#                core.TP_DST:8080,
-                }, 
-        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        [
+                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
+                core.NW_TOS: 0,
+                core.TP_SRC: 8081,
+                core.TP_DST:8081,
+                },openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+                                   [
                 [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
-         ],
-        )
+                ],)
 
+        test.install_datapath_flow(dpid,{ 
+                core.IN_PORT: 0,
+                core.DL_DST: dl_src,
+                core.DL_SRC: test.bridge_mac,
+                core.DL_VLAN: 0xffff,
+                core.DL_VLAN_PCP: 0,
+                core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+                core.NW_DST: nw_src_host,
+                core.NW_SRC: "10.3.0.0",
+                core.NW_SRC_N_WILD: 16,
+                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
+                core.NW_TOS: 0,
+                core.TP_SRC: 8081,
+                core.TP_DST:8081,
+                },openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+                                   [
+                [openflow.OFPAT_OUTPUT, [-1,  1]]
+                ],)
+        os.system(("ip addr add %s/30 dev br0"%(nw_src_router)));
     return True
-
+    
 ##
 ## main
 ##
@@ -216,15 +206,12 @@ class network_stack_test(core.Component):
         
     
     def install(self):
-        
         res = os.popen("ifconfig br0")
         if res == None:
             sys.exit(1)
-
         for line in res.readlines():
             if re.search("HWaddr (([\da-fA-F]{2}[\:]{0,1}){6})", line) != None:
                 self.bridge_mac = re.search("HWaddr (([\da-fA-F]{2}[\:]{0,1}){6})", line).group(1)
-
         if self.bridge_mac == "":
             print "Failed to find bridge interface"
             sys.exit(1)
@@ -256,11 +243,9 @@ class network_stack_test(core.Component):
         ws = self.resolve(str(webservice.webservice))
         v1 = ws.get_version("1")
 
-        switch_delay_testp = webservice.WSPathStaticString("switch_delay_test")
-
+        switch_delay_testp = webservice.WSPathStaticString("network_stack_test")
         permitp = webservice.WSPathStaticString("installflows")
-        installflows = ( switch_delay_testp, permitp, 
-                         WSPathFlowNum(), WSPathFlowType())
+        installflows = ( switch_delay_testp, permitp, WSPathFlowNum())
         v1.register_request(ws_install_flows, "GET", installflows, 
                             "Send details about the installed flows for the test.")
         
