@@ -102,6 +102,16 @@ def datapath_join(dpid, attrs):
                                [
             [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
             ],)
+
+    test.install_datapath_flow(dpid, { 
+            core.IN_PORT: 0,
+            core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+            core.NW_SRC: "10.3.0.0",
+            core.NW_SRC_N_WILD: 16,
+            }, openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+                               [
+            [openflow.OFPAT_OUTPUT, [-1, 1]]
+            ],)
     print ("switch %s joined"%(dpid))
     test.st['ports'][dpid] = attrs['ports'][:]
     os.system("ip addr add 10.2.0.1/30 dev br0")
