@@ -156,18 +156,12 @@ def install_test_flows(dpid, num):
         print  nw_src_host + " " + nw_src_router
         test.install_datapath_flow(dpid,{ 
                 core.IN_PORT: 1,
-                #core.DL_SRC: dl_src,
-                #core.DL_DST: test.bridge_mac,
-                core.DL_VLAN: 0xffff,
-                core.DL_VLAN_PCP: 0,
                 core.DL_TYPE: ethernet.ethernet.IP_TYPE,
-                core.NW_SRC: nw_src_host,
                 core.NW_DST: "10.3.0.0",
                 core.NW_DST_N_WILD: 16,
                 core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
                 core.NW_TOS: 0,
-                core.TP_SRC: 8081,
-                core.TP_DST:8081,
+                core.TP_DST:7,
                 },openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
                                    [
                 [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_LOCAL]]
@@ -175,18 +169,12 @@ def install_test_flows(dpid, num):
 
         test.install_datapath_flow(dpid,{ 
                 core.IN_PORT: 0,
-                #core.DL_DST: dl_src,
-                #core.DL_SRC: test.bridge_mac,
-                core.DL_VLAN: 0xffff,
-                core.DL_VLAN_PCP: 0,
                 core.DL_TYPE: ethernet.ethernet.IP_TYPE,
-                core.NW_DST: nw_src_host,
                 core.NW_SRC: "10.3.0.0",
                 core.NW_SRC_N_WILD: 16,
                 core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
                 core.NW_TOS: 0,
-                core.TP_SRC: 8081,
-                core.TP_DST:8081,
+                core.TP_SRC: 7,
                 },openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
                                    [
                 [openflow.OFPAT_OUTPUT, [-1,  1]]
