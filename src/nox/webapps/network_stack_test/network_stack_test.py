@@ -156,8 +156,8 @@ def install_test_flows(dpid, num):
         print  nw_src_host + " " + nw_src_router
         test.install_datapath_flow(dpid,{ 
                 core.IN_PORT: 1,
-                core.DL_SRC: dl_src,
-                core.DL_DST: test.bridge_mac,
+                #core.DL_SRC: dl_src,
+                #core.DL_DST: test.bridge_mac,
                 core.DL_VLAN: 0xffff,
                 core.DL_VLAN_PCP: 0,
                 core.DL_TYPE: ethernet.ethernet.IP_TYPE,
@@ -175,8 +175,8 @@ def install_test_flows(dpid, num):
 
         test.install_datapath_flow(dpid,{ 
                 core.IN_PORT: 0,
-                core.DL_DST: dl_src,
-                core.DL_SRC: test.bridge_mac,
+                #core.DL_DST: dl_src,
+                #core.DL_SRC: test.bridge_mac,
                 core.DL_VLAN: 0xffff,
                 core.DL_VLAN_PCP: 0,
                 core.DL_TYPE: ethernet.ethernet.IP_TYPE,
