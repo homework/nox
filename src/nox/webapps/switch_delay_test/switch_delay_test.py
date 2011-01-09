@@ -30,7 +30,6 @@ Switch_Delay_Test = None
 ##
 ## utility functions
 ##
-
 class WSPathFlowNum(webservice.WSPathComponent):
     def __init__(self):
         webservice.WSPathComponent.__init__(self)
@@ -53,6 +52,24 @@ class WSPathFlowType(webservice.WSPathComponent):
 
     def extract(self, pc, data):
         # allow only a couple of values and check
+        return webservice.WSPathExtractResult(pc)
+
+class WSPathExactNum(webservice.WSPathComponent):
+    def __init__(self):
+        webservice.WSPathComponent.__init__(self)
+    def __str__(self):
+        return "exact_num"
+    def extract(self, pc, data):
+        # check this is number
+        return webservice.WSPathExtractResult(pc)
+
+class WSPathWildNum(webservice.WSPathComponent):
+    def __init__(self):
+        webservice.WSPathComponent.__init__(self)
+    def __str__(self):
+        return "wild_num"
+    def extract(self, pc, data):
+        # check this is number
         return webservice.WSPathExtractResult(pc)
 
 ##
@@ -90,20 +107,101 @@ def ws_install_flows(request, args):
             return "{\"result\":0, \"reason\": \"Invalid params\"}"
 
     return "{\"result\":1}"
+
+
+def ws_reset_flows(request, args):
+    """ WS interface to permit(). """
+    print args  
+
+    if len(Switch_Delay_Test.st['ports']) < 1 :
+        return "{\"result\":0, \"reason\": \"No switch yet joinned\"}"
+    print "delete flows"
+
+    for dpid in Switch_Delay_Test.st['ports'].keys():
+        Switch_Delay_Test.delete_datapath_flow(dpid, {})
+
+    return "{\"result\":1}" 
+
+
+def ws_mix_flows(request, args):
+    """ WS interface to permit(). """
+    print args  
+    if len(Switch_Delay_Test.st['ports']) < 1 :
+        return "{\"result\":0, \"reason\": \"No switch yet joinned\"}"
+
+    print "insert mix flows"
+    for dpid in Switch_Delay_Test.st['ports'].keys():
+        print ("%s %s"%(args.get('wild_num'), args.get('exact_num')));
+        install_mix_flows(dpid, args.get('wild_num'), args.get('exact_num'))
+
+    return "{\"result\":1}" 
+
+def install_mix_flows(dpid, wild, exact):
+    j=1
+#    wild= 0
+    for i in range(int(exact)):
+        dst_ip = ("10.3.%d.%d"%(int((i/256)),i%256))        
+        print dst_ip
+        Switch_Delay_Test.install_datapath_flow(dpid,
+        { 
+                core.IN_PORT: 1,
+                core.DL_SRC: "10:20:30:40:50:61",
+                core.DL_DST: "10:20:30:40:50:60",
+                core.DL_VLAN: 0xffff,
+                core.DL_VLAN_PCP: 0,
+                core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+                core.NW_SRC: "10.2.0.1",
+                core.NW_DST: dst_ip,
+                core.NW_DST_N_WILD: 0,
+                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
+                core.NW_TOS: 0,
+                core.TP_SRC: 8080,
+                core.TP_DST:8080,
+                }, 
+        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+        [
+                [openflow.OFPAT_SET_DL_SRC, "10:20:30:40:50:60"],
+                [openflow.OFPAT_SET_DL_DST, "10:20:30:40:50:62"],
+                [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_IN_PORT]]
+         ],
+        )
+
+    i = (i)/256
+    for j in range(int(wild)):
+        i=i+1
+        dst_ip = ("10.%d.%d.0"%(int((i/256)),i%256))        
+        print dst_ip
+        Switch_Delay_Test.install_datapath_flow(dpid,
+        { 
+                core.IN_PORT: 1,
+                core.DL_SRC: "10:20:30:40:50:61",
+                core.DL_DST: "10:20:30:40:50:60",
+                core.DL_VLAN: 0xffff,
+                core.DL_VLAN_PCP: 0,
+                core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+                core.NW_SRC: "10.2.0.1",
+                core.NW_DST: dst_ip,
+                core.NW_DST_N_WILD: 8,
+                core.NW_PROTO: ipv4.ipv4.UDP_PROTOCOL,
+                core.NW_TOS: 0,
+                core.TP_SRC: 8080,
+                core.TP_DST:8080,
+                }, 
+        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+        [
+                [openflow.OFPAT_SET_DL_SRC, "10:20:30:40:50:60"],
+                [openflow.OFPAT_SET_DL_DST, "10:20:30:40:50:62"],
+                [openflow.OFPAT_OUTPUT, [-1,  openflow.OFPP_IN_PORT]]
+         ],
+        )
+
+
+    return True
+
 #
 #  curl -i -k -X POST -H "Content-Type: application/json" -d "{\"hello\":\"world\"}" \
 #  https://10.1.0.1/ws.v1/switch_delay_test/test_http_body
-#
-def ws_test_http_body(request, data):
-    """ WS interface to permit(). """
-    content = webservice.json_parse_message_body(request)
-    if content == None:
-        print "error in getting state"
-        return webservice.NOT_DONE_YET
-    print content
-    print data
-    return "{\"result\":1}"
-    
+#    
 def install_test_flows(dpid, num, type):
     j=1
     wild= 0
@@ -192,17 +290,22 @@ class switch_delay_test(core.Component):
 
         switch_delay_testp = webservice.WSPathStaticString("switch_delay_test")
 
+        permitp = webservice.WSPathStaticString("resetflows")
+        resetflows = ( switch_delay_testp, permitp)
+        v1.register_request(ws_reset_flows, "GET", resetflows, 
+                            "Send details about the installed flows for the test.")
+
+        permitp = webservice.WSPathStaticString("mixflows")
+        exactp = webservice.WSPathStaticString("exact")
+        wildp = webservice.WSPathStaticString("wild")
+        mixflows = ( switch_delay_testp,permitp, exactp, WSPathExactNum(),wildp, WSPathWildNum())
+        v1.register_request(ws_mix_flows, "GET", mixflows, 
+                            "Send details about the installed flows for the test.")
+
         permitp = webservice.WSPathStaticString("installflows")
         installflows = ( switch_delay_testp, permitp, 
                          WSPathFlowNum(), WSPathFlowType())
         v1.register_request(ws_install_flows, "GET", installflows, 
-                            "Send details about the installed flows for the test.")
-
-        switch_delay_testp = webservice.WSPathStaticString("switch_delay_test")
-
-        bodyp = webservice.WSPathStaticString("test_http_body")
-        installflows = ( switch_delay_testp, bodyp)
-        v1.register_request(ws_test_http_body, "POST", installflows, 
                             "Send details about the installed flows for the test.")
         
     def getInterface(self): return str( switch_delay_test)
