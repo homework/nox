@@ -23,8 +23,8 @@
 
 #define BRIDGE_INTERFACE_NAME "br0"
 
-#define MAX_ROUTABLE_LEASE_DURATION 1800
-#define MAX_NON_ROUTABLE_LEASE_DURATION 30
+#define MAX_ROUTABLE_LEASE 1800
+#define MAX_NON_ROUTABLE_LEASE 30
 
 #define ROUTABLE_SUBNET "10.2.0.0"
 #define ROUTABLE_NETMASK 16
@@ -596,7 +596,7 @@ namespace vigil
 
     //get the exact message type of the dhcp request
     uint8_t dhcp_msg_type = 0;
-    uint32_t requested_ip = 0;
+    uint32_t requested_ip = dhcp->ciaddr;
     while(data_len > 2) {
       uint8_t dhcp_option = data[pointer];
       uint8_t dhcp_option_len = data[pointer+1];
@@ -620,10 +620,20 @@ namespace vigil
       data_len -=(2 + dhcp_option_len );
       pointer +=(2 + dhcp_option_len );
     }
+
+    if(dhcp_msg_type == DHCPINFORM) {
+      return STOP;
+    } else if(dhcp_msg_type == DHCPDECLINE){
+      return STOP;
+    }
+
     //Must create a fucntion that chooses this ip for the state of the DHCP server. 
     ipaddr send_ip = this->select_ip(ethernetaddr(hdr.ether->ether_shost), dhcp_msg_type, 
 				     ntohl(requested_ip));
-    bool is_routable =(this->ip_matching(ipaddr(ROUTABLE_SUBNET),ROUTABLE_NETMASK, ntohl((uint32_t)send_ip)) || (this->ip_matching(ipaddr(INIT_SUBNET),INIT_NETMASK, ntohl((uint32_t)send_ip))));
+    bool is_routable =
+      (this->ip_matching(ipaddr(ROUTABLE_SUBNET),ROUTABLE_NETMASK, ntohl((uint32_t)send_ip)) || 
+       (this->ip_matching(ipaddr(INIT_SUBNET),INIT_NETMASK, ntohl((uint32_t)send_ip))));
+    bool is_init =  (this->ip_matching(ipaddr(INIT_SUBNET),INIT_NETMASK, ntohl((uint32_t)send_ip)));
 
     //TODO: if ip is routable, add ip to the interface
     if(is_routable) {
@@ -635,15 +645,17 @@ namespace vigil
     uint8_t reply_msg_type = (dhcp_msg_type == DHCPDISCOVER?DHCPOFFER:DHCPACK);
     
     if( (requested_ip != 0)  &&
-	((dhcp_msg_type == DHCPREQUEST) && (requested_ip != (uint32_t)send_ip))){
+	((dhcp_msg_type == DHCPREQUEST) && 
+	 (requested_ip != (uint32_t)send_ip))){
       struct in_addr in;
       in.s_addr = send_ip;
       printf("DHCPNACK: requested ip differ from send_ip %s\n", inet_ntoa(in));
       reply_msg_type = DHCPNAK;
+      send_ip = requested_ip;
     }
-    size_t len = generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, 
-				     ntohl((uint32_t)send_ip), reply_msg_type, 
-				     is_routable?MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION);
+    size_t len = 
+      generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, ntohl((uint32_t)send_ip), reply_msg_type, 
+			  (is_routable&& !is_init)?MAX_ROUTABLE_LEASE:MAX_NON_ROUTABLE_LEASE);
     
     send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
 			 OFPP_IN_PORT, pi.in_port, 1);
@@ -727,11 +739,11 @@ namespace vigil
     
     //firstly check if the mac address is aloud access
     is_routable = this->check_access(ether); 
-    lease_end +=(is_routable)?MAX_ROUTABLE_LEASE_DURATION:MAX_NON_ROUTABLE_LEASE_DURATION;
+    lease_end +=(is_routable)?MAX_ROUTABLE_LEASE:MAX_NON_ROUTABLE_LEASE;
     //printf("is_routable: %s\n", (is_routable)?"True":"False");
     
     //check now if we can find the MAC in the list 
-    if( ((iter_ether = this->mac_mapping.find(ether)) != this-> mac_mapping.end()) &&
+    if( ((iter_ether = this->mac_mappin g.find(ether)) != this-> mac_mapping.end()) &&
 	(iter_ether->second != NULL)) {
       state = iter_ether->second;
       ip = ntohl(state->ip);
@@ -843,6 +855,7 @@ namespace vigil
     //add element in the vector 
     this->mac_blacklist.insert(ether); 
     std::vector<datapathid *>::iterator it;
+    printf("blaclisting : %s\n", ether.string().c_str());
 
     //send command to delete flow from cache        
     ofp_flow_mod* ofm;
@@ -858,6 +871,7 @@ namespace vigil
     memcpy(ofm->match.dl_src, ether.octet, sizeof ether);
     ofm->command = htons(OFPFC_DELETE);
     ofm->buffer_id = htonl(-1);
+    ofm-> out_port = OFPP_NONE;
     for(it = this->registered_datapath.begin(); it < this->registered_datapath.end(); it++) {
       send_openflow_command(**it, &ofm->header, false);
     }
