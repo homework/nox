@@ -437,10 +437,10 @@ namespace vigil
     // from the server ignore state rquirement. 
     is_src_local = ip_matching(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK, ipaddr(ntohl(flow.nw_src))) || ip_matching(ipaddr(INIT_SUBNET), INIT_NETMASK, ipaddr(ntohl(flow.nw_src)));
 
-    if ( (ntohl(flow.nw_src)&0x3) == 1) {
+    if (  (is_src_local) && (ntohl(flow.nw_src)&0x3) == 1) {
       if((this->mac_mapping.find(flow.dl_src) == this->mac_mapping.end())  || 
 	 ((src_state = this->mac_mapping[flow.dl_src]) == NULL) ){
-	printf("No state found for source mac\n");
+	printf("No state found for source mac %s\n", ethernetaddr(flow.dl_src).string().c_str());
 	return STOP;
       }  
       if( src_state->ip != flow.nw_src ){
@@ -448,7 +448,8 @@ namespace vigil
 	return STOP;
       }
     } else if(flow.dl_src != this->bridge_mac) {
-      printf("received packet from unrecorded mac. discarding\n");
+      printf("received packet from unrecorded mac. discarding (dl_src:%s bridge_mac:%s)\n", 
+	     flow.dl_src.string().c_str(), this->bridge_mac.string().c_str());
       return STOP;
     }
     
@@ -726,7 +727,7 @@ namespace vigil
   dhcp::select_ip(const ethernetaddr& ether, uint8_t dhcp_msg_type, uint32_t requested_ip) {
     map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter_ether;
     struct dhcp_mapping *state;
-    bool is_routable;
+    //bool is_routable;
     uint32_t ip = 0;
     timeval tv;
     time_t lease_end = 0;
@@ -738,51 +739,54 @@ namespace vigil
 	   ether.string().c_str(), dhcp_msg_type, dhcp_msg_type_name[dhcp_msg_type]);
     
     //firstly check if the mac address is aloud access
-    is_routable = this->check_access(ether); 
-    lease_end +=(is_routable)?MAX_ROUTABLE_LEASE:MAX_NON_ROUTABLE_LEASE;
+    //is_routable = this->check_access(ether); 
+    //lease_end +=(is_routable)?MAX_ROUTABLE_LEASE:MAX_NON_ROUTABLE_LEASE;
+    lease_end +=MAX_ROUTABLE_LEASE;
     //printf("is_routable: %s\n", (is_routable)?"True":"False");
     
     //check now if we can find the MAC in the list 
-    if( ((iter_ether = this->mac_mappin g.find(ether)) != this-> mac_mapping.end()) &&
+    if( ((iter_ether = this->mac_mapping.find(ether)) != this-> mac_mapping.end()) &&
 	(iter_ether->second != NULL)) {
       state = iter_ether->second;
       ip = ntohl(state->ip);
       state->lease_end = lease_end;
+
       //printf("found mapping for addr %s -> %s\n", ether.string().c_str(), 
       //state->string().c_str());
       //check if the ip is routable and if the web service agrees on that. 
-      if( (!ip_matching(ipaddr((is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET)), 
-			((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) &&
-	  (state->state == DHCP_STATE_FINAL) ) {
-	printf("ip assingment is invalid!\n");	
+      // if( (!ip_matching(ipaddr((is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET)), 
+      // 			((is_routable)? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK), state->ip)) &&
+      // 	  (state->state == DHCP_STATE_FINAL) ) {
+      // 	printf("ip assingment is invalid!\n");	
 
-	//remove old mapping
-	if(this->ip_mapping.find(state->ip) != this->ip_mapping.end())
-	  this->ip_mapping.erase(state->ip);
-	if(this->mac_mapping.find(state->mac) != this->mac_mapping.end()) 
-	  this->mac_mapping.erase(state->mac);
-	delete state;
+      // 	//remove old mapping
+      // 	if(this->ip_mapping.find(state->ip) != this->ip_mapping.end())
+      // 	  this->ip_mapping.erase(state->ip);
+      // 	if(this->mac_mapping.find(state->mac) != this->mac_mapping.end()) 
+      // 	  this->mac_mapping.erase(state->mac);
+      // 	delete state;
 
-	//generate new mapping
-	ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
-			  is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
+      // 	//generate new mapping
+      // 	ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
+      // 			  is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
 
-	printf("lease end: %ld %ld\n",  tv.tv_sec, lease_end);
-	ip++;
-	state = new dhcp_mapping(ipaddr(ip), ether, lease_end, DHCP_STATE_FINAL);
-	//printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
-	//state->string().c_str());
-	this->mac_mapping[ether] = state;
-	this->ip_mapping[ipaddr(ip)] = state;
-      }
-      if((requested_ip == ntohl(state->ip)) && (dhcp_msg_type == DHCPREQUEST))
-	state->state = DHCP_STATE_FINAL;
+      // 	printf("lease end: %ld %ld\n",  tv.tv_sec, lease_end);
+      // 	ip++;
+      // 	state = new dhcp_mapping(ipaddr(ip), ether, lease_end, DHCP_STATE_FINAL);
+      // 	//printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
+      // 	//state->string().c_str());
+      // 	this->mac_mapping[ether] = state;
+      // 	this->ip_mapping[ipaddr(ip)] = state;
+      // }
+      // if((requested_ip == ntohl(state->ip)) && (dhcp_msg_type == DHCPREQUEST))
+      // 	state->state = DHCP_STATE_FINAL;
     } else {
       //check whether you might need to delete some old mapping on the ip map.
       // ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: NON_ROUTABLE_SUBNET), 
       // 			is_routable? ROUTABLE_NETMASK: NON_ROUTABLE_NETMASK);
-      ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: INIT_SUBNET), 
-			is_routable? ROUTABLE_NETMASK: INIT_NETMASK);
+      // ip = find_free_ip(ipaddr(is_routable? ROUTABLE_SUBNET: INIT_SUBNET), 
+      // 			is_routable? ROUTABLE_NETMASK: INIT_NETMASK); 
+      ip = find_free_ip(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK);
       if(!ip) {
 	printf("run out of ip's - no reply\n");
 	return STOP;
@@ -791,10 +795,11 @@ namespace vigil
 
       //create state with new ip and send it out.
       printf("lease end:%ld %ld\n",  tv.tv_sec, lease_end);
-      state = new dhcp_mapping(ipaddr(ip), ether, lease_end, 
-			       is_routable?DHCP_STATE_FINAL:DHCP_STATE_INIT);
-      //printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
-      //	     state->string().c_str());
+      // state = new dhcp_mapping(ipaddr(ip), ether, lease_end, 
+      // 			       is_routable?DHCP_STATE_FINAL:DHCP_STATE_INIT);
+      state = new dhcp_mapping(ipaddr(ip), ether, lease_end, DHCP_STATE_FINAL);
+      printf("inserting new entry for %s - %s\n", ether.string().c_str(), 
+      	     state->string().c_str());
       this->mac_mapping[ether] = state;
       this->ip_mapping[ipaddr(ip)] = state;
       //I need to find here the appropriate ip addr
