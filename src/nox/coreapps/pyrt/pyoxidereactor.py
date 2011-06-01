@@ -20,7 +20,6 @@
 #
 
 import signal
-import nox.lib.core
 import oxidereactor
 import twisted
 import logging, types
@@ -130,7 +129,7 @@ class pyoxidereactor (posixbase.PosixReactorBase):
         posixbase.PosixReactorBase.__init__(self)
         installReactor(self)
         self.installResolver(Resolver(self.oreactor))
-        signal.signal(signal.SIGCHLD, self._handleSigchld)
+        signal.signal(signal.SIGCHLD, lambda : self.callLater(0, reapAllProcesses))
 
         # Twisted uses os.waitpid(pid, WNOHANG) but doesn't try again
         # if the call returns nothing (since not being able to block).
