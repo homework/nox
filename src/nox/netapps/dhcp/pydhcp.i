@@ -1,5 +1,9 @@
 //exporting behaviour of the module to the 
 
+%{
+#include <cstddef>
+%}
+
 %module "nox.coreapps.dhcp"
 
 %include stl.i

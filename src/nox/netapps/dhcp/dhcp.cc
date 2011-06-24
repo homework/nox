@@ -971,7 +971,7 @@ namespace vigil
       perror("addr parse");
       exit(1);
     }
-    local_addr->a_prefixlen = 30;
+    nl_addr_set_prefixlen(local_addr, 30);
     char tmp[1024];
     nl_addr2str (local_addr, tmp, 1024);
     printf("setting ip %s on intf br0(%d)\n", tmp, this->ifindex);
@@ -1017,7 +1017,7 @@ namespace vigil
       perror("addr parse");
       exit(1);
     }
-    local_addr->a_prefixlen = 30;
+    nl_addr_set_prefixlen(local_addr, 30);
     char tmp[1024];
     nl_addr2str (local_addr, tmp, 1024);
     printf("setting ip %s on intf br0(%d)\n", tmp, this->ifindex);
