@@ -167,6 +167,8 @@ Flow::Flow(uint16_t in_port_, const Buffer& buffer, uint64_t cookie_)
     Nonowning_buffer b(buffer);
     const eth_header* eth = pull_eth(b);
     if (eth) {
+        memcpy(dl_src.octet, eth->eth_src, ETH_ADDR_LEN);
+        memcpy(dl_dst.octet, eth->eth_dst, ETH_ADDR_LEN);
         if (ntohs(eth->eth_type) >= ethernet::ETH2_CUTOFF) {
             /* This is an Ethernet II frame */
             dl_type = eth->eth_type;
@@ -199,8 +201,6 @@ Flow::Flow(uint16_t in_port_, const Buffer& buffer, uint64_t cookie_)
 		  VLAN_PCP_SHIFT;
             }
         }
-        memcpy(dl_src.octet, eth->eth_src, ETH_ADDR_LEN);
-        memcpy(dl_dst.octet, eth->eth_dst, ETH_ADDR_LEN);
 
         if (dl_type == htons(ETH_TYPE_IP)) {
             const ip_header *ip = pull_ip(b);

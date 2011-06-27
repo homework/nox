@@ -62,6 +62,9 @@
 #include "netinet++/ethernetaddr.hh"
 #include "netinet++/ipaddr.hh"
 
+#include <srpc.h>
+#include <config.h>
+
 #define ARPOP_REQUEST 1
 #define ARPOP_REPLY 2
 
@@ -233,6 +236,7 @@ struct arphdr {
     bool add_addr(uint32_t ip);
     bool del_addr(uint32_t ip);
     bool extract_headers(uint8_t*, uint32_t, vigil::nw_hdr*);
+    void insert_hwdb(const char *action, const char *ip, const char *mac, const char *hostname);
 
     bool send_flow_modification (Flow fl, uint32_t wildcard, datapathid datapath_id,
 				 uint32_t buffer_id, uint16_t command,
@@ -257,6 +261,8 @@ struct arphdr {
 
     //the mac address of the bridge
     ethernetaddr bridge_mac;
+
+    RpcConnection rpc;
 
     //netlink control  
     struct nl_sock *sk;        //the socket to talk to netlink
