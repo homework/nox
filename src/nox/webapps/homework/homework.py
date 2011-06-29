@@ -24,6 +24,8 @@ from nox.netapps.dhcp.pydhcp import pydhcp_app
 from nox.lib import core, openflow, packet, util
 from nox.lib.packet import ethernet, ipv4
 
+import os
+
 Homework = None
 
 EAPOL_TYPE = 0x888e
@@ -339,15 +341,16 @@ class homework(core.Component):
         Homework.st = { 'permitted': {}, ## eaddr -> None ## [ipaddr, ...]
                         'ports': {},     ## dpid -> attrs
                         }
-        permit_list = open("/etc/homework/whitelist.conf", "r")
+        if os.path.exists("/etc/homework/whitelist.conf") : 
+            permit_list = open("/etc/homework/whitelist.conf", "r")
 
-        for eaddr in permit_list:
-            eaddr = eaddr.strip()
-            print "PERMIT", eaddr
-            eaddr = util.convert_to_eaddr(eaddr)
-            self.st['permitted'][eaddr] = None
+            for eaddr in permit_list:
+                eaddr = eaddr.strip()
+                print "PERMIT", eaddr
+                eaddr = util.convert_to_eaddr(eaddr)
+                self.st['permitted'][eaddr] = None
     
-        print "PERMIT", self.st['permitted'].keys()
+#        print "PERMIT", self.st['permitted'].keys()
             
     def permit_ether_addr(self, eaddr):
         if not self.st:
