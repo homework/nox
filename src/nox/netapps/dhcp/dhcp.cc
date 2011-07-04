@@ -21,10 +21,6 @@
 #include "netinet++/ipaddr.hh"
 #include "dhcp_mapping.hh"
 
-//#include "srpc.h"
-#include "config.h"
-#include "rtab.h"
-
 #define BRIDGE_INTERFACE_NAME "br0"
 
 #define MAX_ROUTABLE_LEASE 1800
@@ -108,36 +104,54 @@ namespace vigil
 
   }
 
-  void dhcp::insert_hwdb(const char *action, const char *ip, const char *mac, const char *hostname) {
-      char query[SOCK_RECV_BUF_LEN], resp[SOCK_RECV_BUF_LEN], stsmsg[RTAB_MSG_MAX_LENGTH];
-      unsigned int bytes = 0, len = 0;
-      //    char *action = "hello", *ip="192.168.1.1", *mac="11:22:33:44:55:66";
-      if(!this->rpc) {
-          if (!rpc_init(0)) {
-              fprintf(stderr, "Failure to initialize rpc system\n");
-              return;
-          }
-          if (!(this->rpc = rpc_connect(HWDB_SERVER_ADDR, HWDB_SERVER_PORT, "HWDB", 1l))) {
-              fprintf(stderr, "Failure to connect to HWDB at %s:%05u\n", HWDB_SERVER_ADDR, HWDB_SERVER_PORT);
-              return;
-          }
-      }
+void dhcp::insert_hwdb(const char *action, const char *ip, 
+	const char *mac, const char *hostname) {
 
-      bytes = sprintf(query, "SQL:insert into Leases values (\"%s\",\"%s\",\"%s\",\"%s\")", 
-              action, ip, mac, "NULL");
+	char q[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
+	unsigned int rlen = 0;
 
-    if (! rpc_call(this->rpc, query, bytes, resp, sizeof(resp), &len)) {
-        fprintf(stderr, "rpc_call() failed\n");
-        //rpc_disconnect(rpc);
-        return;
-    }
-    resp[len] = '\0';
-    if (rtab_status(resp, stsmsg))
-        fprintf(stderr, "RPC error: %s\n", stsmsg);
+	char stsmsg[RTAB_MSG_MAX_LENGTH];
+
+	unsigned int bytes;
+
+	if (!rpc) {
+		fprintf(stderr, "Error: not connected to HWDB.\n");
+		return;
+	}
+
+	bytes = 0;
+	memset(q, 0, SOCK_RECV_BUF_LEN);
+	bytes += sprintf(q + bytes, "SQL:insert into Leases values (" );
+	/* action */
+	bytes += sprintf(q + bytes, "\"%s\", ", action);
+	/* mac address */
+	bytes += sprintf(q + bytes, "\"%s\", ", mac);
+	/* ip address */
+	bytes += sprintf(q + bytes, "\"%s\", ", ip);
+	/* hostname (optional) */
+	bytes += sprintf(q + bytes, "\"%s\")\n",hostname);
+	
+	fprintf(stderr, "%s", q);
+	if (! rpc_call(rpc, q, bytes, r, sizeof(r), &rlen)) {
+		fprintf(stderr, "rpc_call() failed\n");
+		return;
+	}
+	r[rlen] = '\0';
+	if (rtab_status(r, stsmsg))
+		fprintf(stderr, "RPC error: %s\n", stsmsg);
   }
 
 
   void dhcp::install() {
+	
+	/*HWDB*/
+	const char *host;
+	unsigned short port;
+	const char *service;
+	host = HWDB_SERVER_ADDR;
+	port = HWDB_SERVER_PORT;
+	service = "HWDB";
+
     lg.dbg(" Install called ");
     //register_handler<Packet_in_event>(boost::bind(&dhcp::packet_in_handler, this, _1));
     register_handler<Packet_in_event>(boost::bind(&dhcp::mac_pkt_handler, this, _1));
@@ -146,7 +160,17 @@ namespace vigil
     register_handler<Datapath_leave_event>(boost::bind(&dhcp::datapath_leave_handler, this, _1));
     //timeval tv = {1,0};
     //post(boost::bind(&dhcp::refresh_default_flows, this), tv);
-
+	
+	/*HWDB*/
+	rpc = NULL;
+	if (!rpc_init(0)) {
+		fprintf(stderr, "Failure to initialize rpc system\n");
+		return;
+	}
+	if (!(rpc = rpc_connect(const_cast<char *>(host), port, const_cast<char *>(service), 1l))) {
+		fprintf(stderr, "Failure to connect to HWDB at %s:%05u\n", host, port);
+		return;
+	}
     }
 
   void 
@@ -696,7 +720,9 @@ namespace vigil
     size_t len = 
       generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, ntohl((uint32_t)send_ip), reply_msg_type, 
               (is_routable&& !is_init)?MAX_ROUTABLE_LEASE:MAX_NON_ROUTABLE_LEASE);
+
     insert_hwdb("add", send_ip.string().c_str(), flow.dl_src.string().c_str(), "NULL");
+    
     send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
              OFPP_IN_PORT, pi.in_port, 1);
     return STOP;

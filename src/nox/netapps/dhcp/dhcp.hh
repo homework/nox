@@ -62,8 +62,12 @@
 #include "netinet++/ethernetaddr.hh"
 #include "netinet++/ipaddr.hh"
 
-#include <srpc.h>
-#include <config.h>
+/* HWDB */
+extern "C" {
+#include "/home/homeuser/hwdb/srpc.h"
+#include "/home/homeuser/hwdb/config.h"
+#include "/home/homeuser/hwdb/rtab.h"
+}
 
 #define ARPOP_REQUEST 1
 #define ARPOP_REPLY 2
@@ -262,7 +266,8 @@ struct arphdr {
     //the mac address of the bridge
     ethernetaddr bridge_mac;
 
-    RpcConnection rpc;
+	/* HWDB */
+	RpcConnection rpc;
 
     //netlink control  
     struct nl_sock *sk;        //the socket to talk to netlink
