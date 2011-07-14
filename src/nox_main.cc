@@ -158,9 +158,11 @@ void usage(const char* program_name)
 #ifdef HAVE_NETLINK
            "  -i nl:DP_ID             via netlink to local datapath DP_IDX\n"
 #endif
-           "  -i ptcp:[PORT]          listen to TCP PORT (default: %d)\n"
-           "  -i pssl:[PORT]:KEY:CERT:CONTROLLER_CA_CERT\n"        
-           "                          listen to SSL PORT (default: %d)\n"
+           "  -i ptcp:[IP]:[PORT]     listen to TCP PORT on interface specified by IP\n"
+           "                          (default: 0.0.0.0:%d)\n"
+           "  -i pssl:[IP]:[PORT]:KEY:CERT:CONTROLLER_CA_CERT\n"
+           "                          listen to SSL PORT on interface specified by IP\n"
+           "                          (default: 0.0.0.0:%d)\n"
            "  -i pcap:FILE[:OUTFILE]  via pcap from FILE (for testing) write to OUTFILE\n"
            "  -i pcapt:FILE[:OUTFILE] same as \"pcap\", but delay packets based on pcap timestamps\n"
            "  -i pgen:                continuously generate packet-in events\n"
@@ -174,7 +176,7 @@ void usage(const char* program_name)
            "  -l, --libdir=DIRECTORY  add a directory to the search path for application libraries\n"
            "  -p, --pid=FILE          set pid file\n"
            "  -n, --info=FILE         set controller info file\n"
-	   "  -v, --verbose           set maximum verbosity level (for console)\n"
+	   "  -v, --verbose           make console log verbose (shows INFO messages -- use twice for DBG)\n"
 #ifndef LOG4CXX_ENABLED
 	   "  -v, --verbose=CONFIG    configure verbosity\n"
 #endif
@@ -228,7 +230,7 @@ int start_gui() {
         return -1;
     case 0:
         /* Daemon process */
-        char *args[] = {"", (char *) 0 };
+        char * args[] = {(char *)"", (char *) 0 };
         execv("../../src/gui/qt-nox.py", args);
         cout<<"Starting GUI\n";
         break;
@@ -237,12 +239,12 @@ int start_gui() {
 }
 
 
-bool verbose = false;
+int verbose = 0;
 #ifndef LOG4CXX_ENABLED
 vector<string> verbosity;
 #endif
 
-void init_log() {
+void init_log(json_object * platform_config) {
 #ifndef LOG4CXX_ENABLED
     static Vlog_server_socket vlog_server(vlog());
     vlog_server.listen();
@@ -253,13 +255,59 @@ void init_log() {
        default log level defined in the configuration file with DEBUG
        if 'verbose' set.  */
     ::log4cxx::xml::DOMConfigurator::configureAndWatch("etc/log4cxx.xml");
-    if (verbose) {
+    if (verbose == 1) {
+        ::log4cxx::Logger::getRootLogger()->
+            setLevel(::log4cxx::Level::getInfo());
+    } else if (verbose >= 2) {
         ::log4cxx::Logger::getRootLogger()->
             setLevel(::log4cxx::Level::getDebug());
     }
 #else
-    if (verbose) {
-        set_verbosity(0);
+    std::vector<std::string> errors;
+    json_object * nox_conf = json::get_dict_value(platform_config, "nox");
+    if (nox_conf && nox_conf->type == json_object::JSONT_DICT)
+    {
+        json_object * log_conf = json::get_dict_value(nox_conf, "logging");
+        if (log_conf && log_conf->type == json_object::JSONT_ARRAY)
+        {
+            json_array * items = (json_array *)log_conf->object;
+            json_array::iterator i;
+            for (json_array::iterator i = items->begin(); i != items->end(); ++i)
+            {
+                if ((*i)->type == json_object::JSONT_DICT)
+                {
+                    json_object * module = json::get_dict_value(*i, "module");
+                    json_object * facility = json::get_dict_value(*i, "facility");
+                    json_object * level = json::get_dict_value(*i, "level");
+                    std::string module_s = "ANY";
+                    std::string facility_s = "ANY";
+                    std::string level_s = "DBG";
+                    if (module) module_s = module->get_string(true);
+                    if (facility) facility_s = facility->get_string(true);
+                    if (level) level_s = level->get_string(true);
+                    std::string s = module_s + ":" + facility_s + ":" + level_s;
+                    std::string r = vlog().set_levels_from_string(s);
+                    if (r != "ack")
+                    {
+                      errors.push_back(r);
+                    }
+                }
+            }
+        }
+    }
+
+    if (verbose == 1) {
+        set_verbosity("ANY:console:INFO");
+    } else if (verbose >= 2) {
+        set_verbosity("ANY:console:DBG");
+    }
+
+    BOOST_FOREACH (const string& s, verbosity) {
+        set_verbosity(s.c_str());
+    }
+
+    BOOST_FOREACH (const string& s, errors) {
+        lg.err("could not set log level: %s", s.c_str());
     }
 #endif
 }
@@ -371,7 +419,7 @@ int main(int argc, char *argv[])
         case 'v':
 #ifndef LOG4CXX_ENABLED
             if (!optarg) {
-                verbose = true;
+                verbose += 1;
             } else {
                 verbosity.push_back(optarg);
             }
@@ -428,7 +476,7 @@ int main(int argc, char *argv[])
     
     /* Determine the end-user applications to run */
     Application_list applications = parse_application_list(optind, argc, argv);
-    json_object* platform_configuration;
+    json_object* platform_configuration = NULL;
         
     try {
         /* Parse the platform configuration file */
@@ -481,13 +529,7 @@ int main(int argc, char *argv[])
     co_thread_assimilate();
     co_migrate(&co_group_coop);
 
-    init_log();
-
-#ifndef LOG4CXX_ENABLED
-    BOOST_FOREACH (const string& s, verbosity) {
-        set_verbosity(s.c_str());
-    }
-#endif
+    init_log(platform_configuration);
 
     lg.info("Starting %s (%s)", program_name, argv[0]);
             

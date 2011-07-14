@@ -24,6 +24,8 @@ from nox.netapps.dhcp.pydhcp import pydhcp_app
 from nox.lib import core, openflow, packet, util
 from nox.lib.packet import ethernet, ipv4
 
+import os
+
 Homework = None
 
 EAPOL_TYPE = 0x888e
@@ -178,12 +180,9 @@ def permit(eaddr, ipaddr=None):
     if not (eaddr or ipaddr): return 
     
     eaddr = util.convert_to_eaddr(eaddr)
-    pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE,
-                core.DL_SRC: eaddr,
-                }
-    if not ipaddr:
-        old_ipaddrs = Homework.st['permitted'].get(eaddr)
-        Homework.st['permitted'][eaddr] = None
+    # if not ipaddr:
+    #     old_ipaddrs = Homework.st['permitted'].get(eaddr)
+    Homework.st['permitted'][eaddr] = None
 
 #    for dpid in Homework.st['ports']:
         ## permit the forward path to this eaddr/ipaddr
@@ -337,13 +336,22 @@ class homework(core.Component):
     
     def __init__(self, ctxt):
         core.Component.__init__(self, ctxt)
-
         global Homework
         Homework = self
         Homework.st = { 'permitted': {}, ## eaddr -> None ## [ipaddr, ...]
                         'ports': {},     ## dpid -> attrs
                         }
+        if os.path.exists("/etc/homework/whitelist.conf") : 
+            permit_list = open("/etc/homework/whitelist.conf", "r")
+
+            for eaddr in permit_list:
+                eaddr = eaddr.strip()
+                print "PERMIT", eaddr
+                eaddr = util.convert_to_eaddr(eaddr)
+                self.st['permitted'][eaddr] = None
     
+#        print "PERMIT", self.st['permitted'].keys()
+            
     def permit_ether_addr(self, eaddr):
         if not self.st:
             print "some object is not initialized yet"

@@ -35,6 +35,14 @@ lg = logging.getLogger('webserver')
 
 supported_languages = ( "en", "ja" )
 
+def verifyCallback(connection, x509, errnum, errdepth, ok):
+    if not ok:
+        print 'invalid cert from subject:', x509.get_subject()
+        return False
+    else:
+        print "Certs are fine"
+        return True
+
 def lang_from_request(request):
     languages = []
     if request.getHeader("Accept-Language") is None:
@@ -227,20 +235,20 @@ class webserver(Component):
              def load_self_signed_cert(p):
                 import os
                 import nox.lib.config
-                cert_file = 'etc/noxca.cert'
-                key_file  = 'etc/noxca.key.insecure'
+                cert_file = 'etc/noxca.crt'
+                key_file  = 'etc/noxca.key'
                 if not os.path.isfile(cert_file):
-                    if not os.path.isfile(nox.lib.config.pkgsysconfdir+"/noxca.cert"):
+                    if not os.path.isfile(nox.lib.config.pkgsysconfdir+"/noxca.crt"):
                         lg.error('Could not find self signed cert.  Disabling ssl')
                         return
                     else:    
-                        cert_file = nox.lib.config.pkgsysconfdir+"/noxca.cert"
+                        cert_file = nox.lib.config.pkgsysconfdir+"/noxca.crt"
                 if not os.path.isfile(key_file):
-                    if not os.path.isfile(nox.lib.config.pkgsysconfdir+"/noxca.key.insecure"):
+                    if not os.path.isfile(nox.lib.config.pkgsysconfdir+"/noxca.key"):
                         lg.error('Could not find self signed key.  Disabling ssl')
                         return
                     else:    
-                        key_file = nox.lib.config.pkgsysconfdir+"/noxca.key.insecure"
+                        key_file = nox.lib.config.pkgsysconfdir+"/noxca.key"
                 
                 p['ssl_certificate'] = [base64.b64encode(open(cert_file).read())]
                 p['ssl_privatekey']  = [base64.b64encode(open(key_file).read())]
@@ -395,8 +403,23 @@ class webserver(Component):
 
             try:
                 sslContext = UIOpenSSLContextFactory(\
-                    base64.b64decode(p['ssl_privatekey'][0]),
-                    base64.b64decode(p['ssl_certificate'][0]))
+                        base64.b64decode(p['ssl_privatekey'][0]),
+                        base64.b64decode(p['ssl_certificate'][0]))
+
+                if os.path.exists('etc/ca.pem'):
+                    ctx = sslContext.getContext()
+                    ctx.set_verify(
+                            SSL.VERIFY_PEER |
+                            SSL.VERIFY_FAIL_IF_NO_PEER_CERT,
+                            verifyCallback
+                            )
+
+                    # Since we have self-signed certs we have to
+                    # explicitly tell the server to trust them.
+                    ctx.load_verify_locations('etc/ca.pem')
+                else:
+                    print("client authentication disabled")
+
                 if not p['ssl_port'][0] == 0:
                     port = reactor.listenSSL(p['ssl_port'][0],
                                              server.Site(self.root),
@@ -406,6 +429,7 @@ class webserver(Component):
                     port = None
                     self.using_ssl = False
 
+ 
                 self.ssl_privatekey = p['ssl_privatekey'][0]
                 self.ssl_certificate = p['ssl_certificate'][0]
                 self.ssl_port = port

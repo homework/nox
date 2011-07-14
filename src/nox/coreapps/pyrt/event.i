@@ -182,3 +182,39 @@ struct Desc_stats_in_event
 private:
     Desc_stats_in_event();
 };
+
+struct Flow_stats_in_event
+  : public Event
+{
+  static const std::string static_get_name();
+
+ private:
+  Flow_stats_in_event();
+};
+
+struct Queue_stats_in_event
+  : public Event
+{
+  static const std::string static_get_name();
+
+ private:
+  Queue_stats_in_event();
+};
+
+struct Barrier_reply_event
+  : public Event
+{
+  static const std::string static_get_name();
+
+private:
+  Barrier_reply_event();
+};
+
+struct Error_event
+    : public Event
+{
+    static const std::string static_get_name();
+
+private:
+    Error_event();
+};

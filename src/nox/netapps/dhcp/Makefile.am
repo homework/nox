@@ -14,9 +14,9 @@ pkglib_LTLIBRARIES =\
 
 dhcp_la_CPPFLAGS = $(AM_CPPFLAGS) -I $(top_srcdir)/src/nox -I $(top_srcdir)/src/nox/netapps/ -I$(top_builddir)/src/nox/
 dhcp_la_SOURCES = dhcp.hh dhcp.cc dhcp_msg.hh dhcp_proxy.cc dhcp_proxy.hh # dhcp_mapping.cc 
-dhcp_la_LDFLAGS = -module -export-dynamic -lnl -lnl-route -lnl-genl
+dhcp_la_LDFLAGS = -module -export-dynamic -lnl -lnl-route -lnl-genl -lhwdb
 
-NOX_RUNTIMEFILES = meta.json	
+NOX_RUNTIMEFILES = meta.json
 
 NOX_RUNTIMEFILES += __init__.py
 
