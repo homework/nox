@@ -483,11 +483,11 @@ void dhcp::insert_hwdb(const char *action, const char *ip,
     }
 
     //check if src ip is routable and the src mac address is permitted.
-/*    if( (flow.dl_src != this->bridge_mac) && 
+    if( (flow.dl_src != this->bridge_mac) && 
        (!this->p_dhcp_proxy->is_ether_addr_routable(flow.dl_src)) ) {
       printf("MAC address %s is not permitted to send data\n", flow.dl_src.string().c_str());
       return STOP;
-    } */
+    } 
     
     //check if dst ip is routable and we have a mac address for it.
     if(ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, 
@@ -1000,14 +1000,14 @@ void dhcp::insert_hwdb(const char *action, const char *ip,
       send_openflow_command(**it, ofh, false);
     }
 
-    if(this->ip_mapping.find(state->ip) != this->ip_mapping.end()) {
+    /*if(this->ip_mapping.find(state->ip) != this->ip_mapping.end()) {
       del_addr(ntohl(state->ip) + 1);
       this->ip_mapping.erase(state->ip);
     }
     
     if(this->mac_mapping.find(state->mac) != this->mac_mapping.end()) 
       this->mac_mapping.erase(state->mac);
-    delete state;
+    delete state;*/
     
   }
 
