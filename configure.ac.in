@@ -70,7 +70,7 @@ ACI_PACKAGE([netapps],[misc network apps],
                	bindings_storage switchstats flow_fetcher data
                	switch_management networkstate hoststate tablog 
                	route lavi monitoring
-                dhcp insertion_delay_test #add netapps component here
+                dhcp insertion_delay_test homework_dhcp homework_routing #add netapps component here
 		],
                [TURN_ON_NETAPPS])
 ACI_PACKAGE([webapps],[misc ui apps],
