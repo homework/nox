@@ -1,13 +1,14 @@
 {
-    "components": [
-        {
-            "name": "homework",
-            "dependencies": [
-                "dhcp",
-                "pydhcp",
-		"webservice"
-            ],
-            "python": "nox.webapps.homework.homework"
-        }
-    ]
+	"components": [
+	{
+		"name": "homework",
+			"dependencies": [
+				"homework_routing",
+			"homework_dhcp",
+			"pydhcp",
+			"webservice"
+				],
+			"python": "nox.webapps.homework.homework"
+	}
+	]
 }
