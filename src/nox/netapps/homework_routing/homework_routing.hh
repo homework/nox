@@ -62,6 +62,8 @@
 #include "netinet++/cidr.hh"
 
 #include "dhcp_proxy.hh"
+#include "homework_dhcp/homework_dhcp.hh"
+
 
 #include <hwdb/srpc.h>
 #include <hwdb/rtab.h>
@@ -72,16 +74,8 @@ namespace vigil
   using namespace std;
   using namespace vigil::container;
   
-  struct nw_hdr {
-      struct ether_header *ether;
-      struct iphdr *ip;
-      union {
-          struct udphdr *udp;
-          struct tcphdr *tcp;
-          struct igmphdr *igmp;
-      };
-      uint8_t *data;
-  };
+  class homework_dhcp;
+
 
   /** \brief homework_routing
    * \ingroup noxcomponents
@@ -176,14 +170,14 @@ namespace vigil
                   uint32_t buffer_id, uint16_t command,
                   uint16_t idle_timeout, 
                   std::vector<boost::shared_array<char> > act);
-
+          std::vector<std::string> get_dhcp_mapping();
       private:
           void insert_hwdb(const char *action, const char *ip, const char *mac, const char *hostname);
           bool check_access(const ethernetaddr& ether);
           bool extract_headers(uint8_t *data, uint32_t data_len, struct nw_hdr *hdr);
           //a pointer to the proxy of the module
           dhcp_proxy *p_dhcp_proxy;
-          
+          homework_dhcp *p_dhcp;
           //netmasks
           cidr_ipaddr routable, non_routable, multicast, init_subnet;
 
@@ -199,10 +193,6 @@ namespace vigil
 
           /* HWDB */
           RpcConnection rpc;
-          
-          //storage of the ip to mac translation throught the dhcp protocol 
-          std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
-          std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
   };
 }
 

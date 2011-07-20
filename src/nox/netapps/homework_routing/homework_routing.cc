@@ -15,7 +15,7 @@
 #include "datapath-join.hh"
 #include "datapath-leave.hh"
 
-#include "homework_dhcp/dhcp_mapping.hh"
+//#include "homework_dhcp/dhcp_mapping.hh"
 #include "netinet++/ethernet.hh"
 #include "netinet++/ip.hh"
 #include "netinet++/ipaddr.hh"
@@ -65,7 +65,7 @@ namespace vigil
         unsigned char addr[ETH_ALEN];
         struct ifreq ifr;
         int s;
-        struct nl_cache *cache;
+        //struct nl_cache *cache;
         /*HWDB*/
         const char *host;
         unsigned short port;
@@ -110,6 +110,7 @@ namespace vigil
         lg.info("br0 mac addr : %s", this->bridge_mac.string().c_str());
         close(s);
 
+        this->resolve(p_dhcp);
     }
 
     /////////////////////////////////////
@@ -450,20 +451,15 @@ namespace vigil
             is_src_local = this->routable.matches(ipaddr(ntohl(flow.nw_src))) || 
                 this->init_subnet.matches(ipaddr(ntohl(flow.nw_src)));
 
-            if (  (is_src_local) && (ntohl(flow.nw_src)&0x3) == 1) {
-                if((this->mac_mapping.find(flow.dl_src) == this->mac_mapping.end())  || 
-                        ((src_state = this->mac_mapping[flow.dl_src]) == NULL) ){
-                    lg.info("No state found for source mac %s", ethernetaddr(flow.dl_src).string().c_str());
-                    return STOP;
-                }  
-                if( src_state->ip != flow.nw_src ){
-                    lg.info("Source hosts uses unassigned ip address");
+            if((is_src_local) && (ntohl(flow.nw_src)&0x3) == 1) {
+                if ( (!this->p_dhcp->is_valid_mapping(ipaddr(ntohl(flow.nw_src)), flow.dl_src)) &&
+                        (flow.dl_src != this->bridge_mac)) {
+                    lg.info("received packet from unrecorded mac. "
+                            "i discarding (dl_src:%s bridge_mac:%s)\n", 
+                            flow.dl_src.string().c_str(), 
+                            this->bridge_mac.string().c_str());
                     return STOP;
                 }
-            } else if(flow.dl_src != this->bridge_mac) {
-                lg.info("received packet from unrecorded mac. discarding (dl_src:%s bridge_mac:%s)\n", 
-                        flow.dl_src.string().c_str(), this->bridge_mac.string().c_str());
-                return STOP;
             }
 
 
@@ -517,31 +513,30 @@ namespace vigil
             if(this->routable.matches(ipaddr(ntohl(flow.nw_dst))) ) {
                 //destination is local
                 //required assumption for  packet destined to the bridged intf. 
-                if((flow.dl_dst == this->bridge_mac) && 
-                        (this->ip_mapping.find(ipaddr(htonl(flow.nw_dst) - 1)) != this->ip_mapping.end())) {
-
+                if((flow.dl_dst == this->bridge_mac)) {
                     dst_port = 0;
                     //required properties for a packet to be destined to one of the internal hosts.
-                } else if ( (this->ip_mapping.find(ipaddr(ntohl(flow.nw_dst))) != this->ip_mapping.end()) ) {
+                //TODO: what if the destination is not allowed to talk?
+                } else {
                     //output to port 1
                     lg.info("packet destined to port 1");
                     dst_port = 1;
-                } else {
-                    return STOP;
                 }
             } else {
                 dst_port = 0;
             }
 
-            is_dst_local = this->routable.matches(ipaddr(ntohl(flow.nw_dst))) || 
+            is_dst_local = this->routable.matches(ipaddr(ntohl(flow.nw_dst))) ||
                 this->init_subnet.matches(ipaddr(ntohl(flow.nw_dst)));
             if(is_dst_local && is_src_local && (dst_port != 0) && (!is_src_router)) {
+
+                ethernetaddr dst_mac =this->p_dhcp->get_mac(ipaddr(ntohl(flow.nw_dst)));
                 boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_dl_addr)]);
                 act.push_back(ofp_out);
-                ofp_act_dl_addr = (ofp_action_dl_addr *)ofp_out.get(); 
+                ofp_act_dl_addr = (ofp_action_dl_addr *)ofp_out.get();
                 ofp_act_dl_addr->type = htons(OFPAT_SET_DL_SRC);
                 ofp_act_dl_addr->len = htons(sizeof(ofp_action_dl_addr));
-                memcpy(ofp_act_dl_addr->dl_addr, (const uint8_t *)this->bridge_mac, 
+                memcpy(ofp_act_dl_addr->dl_addr, (const uint8_t *)this->bridge_mac,
                         sizeof ofp_act_dl_addr->dl_addr);
 
                 ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_dl_addr)]);
@@ -549,8 +544,8 @@ namespace vigil
                 ofp_act_dl_addr = (ofp_action_dl_addr *)ofp_out.get();
                 ofp_act_dl_addr->type = htons(OFPAT_SET_DL_DST);
                 ofp_act_dl_addr->len = htons(sizeof(ofp_action_dl_addr));
-                memcpy(ofp_act_dl_addr->dl_addr, 
-                        (const uint8_t *)this->ip_mapping[ipaddr(ntohl(flow.nw_dst))]->mac, 
+                memcpy(ofp_act_dl_addr->dl_addr,
+                        (const uint8_t *)dst_mac,
                         sizeof ofp_act_dl_addr->dl_addr);
 
                 ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_dl_addr)]);
@@ -558,15 +553,15 @@ namespace vigil
                 ofp_act_out = (ofp_action_output *)ofp_out.get();
                 ofp_act_out->type = htons(OFPAT_OUTPUT);
                 ofp_act_out->len = htons(sizeof(ofp_action_output));
-                ofp_act_out->max_len = htons(2000);    
+                ofp_act_out->max_len = htons(2000);
                 ofp_act_out->port = (dst_port==flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port);
-            } else {   
+            } else {
                 boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
                 act.push_back(ofp_out);
-                ofp_act_out = (ofp_action_output *)ofp_out.get(); 
+                ofp_act_out = (ofp_action_output *)ofp_out.get();
                 ofp_act_out->type = htons(OFPAT_OUTPUT);
                 ofp_act_out->len = htons(sizeof(ofp_action_output));
-                ofp_act_out->max_len = htons(2000);    
+                ofp_act_out->max_len = htons(2000);
                 ofp_act_out->port = (dst_port==flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port);
             }
             this->send_flow_modification (flow, wildcard, pi.datapath_id,
@@ -581,17 +576,18 @@ namespace vigil
         this->p_dhcp_proxy = _p_dhcp_proxy;
     }  
 
-    //    std::vector<std::string> 
-    //        homework_routing::get_dhcp_mapping() { 
-    //            std::map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter = 
-    //                this->mac_mapping.begin();
-    //            std::vector<std::string> v;
-    //            for (; iter != this->mac_mapping.end(); iter++) {
-    //                if(iter->second == NULL) continue;
-    //                v.push_back(iter->second->string()); 
-    //            }
-    //            return v;
-    //        };
+    std::vector<std::string> 
+        homework_routing::get_dhcp_mapping() { 
+            //std::map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter = 
+            //this->mac_mapping.begin();
+            //                std::vector<std::string> v;
+            //                for (; iter != this->mac_mapping.end(); iter++) {
+            //                    if(iter->second == NULL) continue;
+            //                    v.push_back(iter->second->string()); 
+            //                }
+            //                return v;
+            return this->p_dhcp->get_dhcp_mapping();
+        };
 
     std::vector<std::string> 
         homework_routing::get_blacklist_status() {
@@ -604,10 +600,10 @@ namespace vigil
             return v;
         }
 
-//    bool 
-//        homework_routing::check_access(const ethernetaddr& ether) {
-//            return this->p_dhcp_proxy->is_ether_addr_routable(ether);
-//        }
+    //    bool 
+    //        homework_routing::check_access(const ethernetaddr& ether) {
+    //            return this->p_dhcp_proxy->is_ether_addr_routable(ether);
+    //        }
 
     void 
         homework_routing::whitelist_mac(const ethernetaddr& ether) {
@@ -645,17 +641,11 @@ namespace vigil
 
     void 
         homework_routing::revoke_mac_access(const ethernetaddr& ether) {
-            struct dhcp_mapping *state = NULL;
+            //struct dhcp_mapping *state = NULL;
             ofp_flow_mod* ofm;
             size_t size = sizeof(ofp_flow_mod);
-            vector<datapathid *>::iterator it;
-
-            lg.info("deleting state of %s", ether.string().c_str());
-            if(this->mac_mapping.find(ether) == this->mac_mapping.end()) {
-                lg.info("No state found for %s\n", ether.string().c_str());
-                return;
-            }
-            state = this->mac_mapping[ether];
+            vector<datapathid *>::iterator it; 
+            //state = this->mac_mapping[ether];
 
             boost::shared_array<char> raw_of(new char[size]);
             ofm = (ofp_flow_mod*) raw_of.get();
@@ -695,16 +685,6 @@ namespace vigil
             for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
                 send_openflow_command(**it, ofh, false);
             }
-
-            /*if(this->ip_mapping.find(state->ip) != this->ip_mapping.end()) {
-              del_addr(ntohl(state->ip) + 1);
-              this->ip_mapping.erase(state->ip);
-              }
-
-              if(this->mac_mapping.find(state->mac) != this->mac_mapping.end()) 
-              this->mac_mapping.erase(state->mac);
-              delete state;*/
-
         }
 
     /////////////////////////////////////

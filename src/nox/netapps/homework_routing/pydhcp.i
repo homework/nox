@@ -4,7 +4,7 @@
 #include <cstddef>
 %}
 
-%module "nox.coreapps.dhcp"
+%module "nox.netapps.homework_routing"
 
 %include stl.i
 
@@ -26,7 +26,6 @@ namespace std {
 }
 
 %include "dhcp_proxy.hh"
- //%include "dhcp.hh"
 
 %pythoncode
 %{
@@ -42,7 +41,6 @@ namespace std {
 
       def configure(self, configuration):
         self.pscpa.configure(configuration)
-        #self.dhcp_app = self.resolve(str(dhcp_app.dhcp_app))
 
       def install(self):
         pass

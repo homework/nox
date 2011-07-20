@@ -17,6 +17,7 @@
 #include "netinet++/ethernet.hh"
 #include "netinet++/ip.hh"
 #include "netinet++/ipaddr.hh"
+#include "dhcp_mapping.hh"
 
 const char *dhcp_msg_type_name[] = {NULL, "DHCPDiscover", "DHCPOffer", 
                     "DHCPRequest", "DHCPDecline", "DHCPAck", 
@@ -45,8 +46,6 @@ namespace vigil
 
     void homework_dhcp::configure(const Configuration* c) {
         lg.dbg(" Configure called ");
-
-        resolve(p_routing);
 
         this->routable = cidr_ipaddr(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK);
         this->non_routable = cidr_ipaddr(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK);
@@ -118,7 +117,7 @@ namespace vigil
         if(ioctl(s, SIOCGIFHWADDR, &ifr) < 0) {
             perror("Failed to get mac address");
             exit(1);
-        }    
+        }
         memcpy(addr, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
 
         this->bridge_mac = ethernetaddr(addr);
@@ -199,7 +198,7 @@ namespace vigil
         flow.nw_proto = ip_::proto::UDP;
         flow.tp_src = htons(68);
         flow.tp_dst = htons(67);  
-        this->p_routing->send_flow_modification (flow, wildcard, pi.datapath_id,
+        this->send_flow_modification (flow, wildcard, pi.datapath_id,
                 -1, OFPFC_ADD, OFP_FLOW_PERMANENT, act);
 
         return CONTINUE;
@@ -228,6 +227,8 @@ namespace vigil
                 (flow.nw_proto != ip_::proto::UDP) ||
                 (ntohs(flow.tp_dst) != 67) || 
                 (ntohs(flow.tp_src) != 68)) {
+        
+            lg.dbg("flow %s not dhcp. skipping.", flow.to_string().c_str());
             return CONTINUE;
         }  
 
@@ -265,7 +266,7 @@ namespace vigil
             } else if(dhcp_option == 53) {
                 dhcp_msg_type = data[pointer + 2];
                 if((dhcp_msg_type <1) || (dhcp_msg_type > 8)) {
-                    printf("Invalid DHCP Message Type : %d\n", dhcp_msg_type);
+                    lg.err("Invalid DHCP Message Type : %d\n", dhcp_msg_type);
                     return STOP;
                 } 
             }else if(dhcp_option == 50) {
@@ -656,6 +657,75 @@ namespace vigil
             }
             return true;
         }
+
+        ethernetaddr
+            homework_dhcp::get_mac(ipaddr ip) {
+                ethernetaddr ret;
+                if(this->ip_mapping.find(ip) != this->ip_mapping.end())
+                    return this->ip_mapping[ip]->mac;
+                return ret;
+            }
+
+
+        bool
+            homework_dhcp::is_valid_mapping(ipaddr ip, ethernetaddr mac) {
+                if(this->ip_mapping.find(ip) == this->ip_mapping.end()) {
+                    return false;
+                } else
+                    return (mac == (this->ip_mapping[ip]->mac));
+            }
+
+
+        bool
+            homework_dhcp::send_flow_modification (Flow flow, uint32_t wildcard,  datapathid datapath_id,
+                    uint32_t buffer_id, uint16_t command, uint16_t timeout,
+                    std::vector<boost::shared_array<char> > act) {
+
+                std::vector< boost::shared_array<char> >::iterator iter;
+                ofp_flow_mod* ofm;
+                size_t size = sizeof(*ofm);
+                struct ofp_action_header *ofp_hdr;
+
+                for(iter = act.begin() ; iter != act.end(); iter++) {
+                    ofp_hdr = (struct ofp_action_header *)iter->get();
+                    size += ntohs(ofp_hdr->len);
+                }
+                boost::shared_array<char> raw_of(new char[size]);
+                ofm = (ofp_flow_mod*) raw_of.get();
+                ofm->header.version = OFP_VERSION;
+                ofm->header.type = OFPT_FLOW_MOD;
+                ofm->header.length = htons(size);
+                ofm->match.wildcards = htonl(wildcard);
+                ofm->match.in_port = htons(flow.in_port);
+                ofm->match.dl_vlan = flow.dl_vlan;
+                ofm->match.dl_vlan_pcp = flow.dl_vlan_pcp;
+                memcpy(ofm->match.dl_src, flow.dl_src.octet, sizeof ofm->match.dl_src);
+                memcpy(ofm->match.dl_dst, flow.dl_dst.octet, sizeof ofm->match.dl_dst);
+                ofm->match.dl_type = flow.dl_type;
+                ofm->match.nw_src = flow.nw_src;
+                ofm->match.nw_dst = flow.nw_dst;
+                ofm->match.nw_proto = flow.nw_proto;
+                ofm->match.nw_tos = flow.nw_tos;
+                ofm->match.tp_src = flow.tp_src;
+                ofm->match.tp_dst = flow.tp_dst;
+                ofm->cookie = htonl(0);
+                ofm->command = htons(command);
+                ofm->buffer_id = htonl(buffer_id);
+                ofm->idle_timeout = htons(timeout);
+                ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
+                ofm->priority = htons(OFP_DEFAULT_PRIORITY);
+                ofm->flags = htons( OFPFF_SEND_FLOW_REM); // | OFPFF_CHECK_OVERLAP);
+
+                char *data = (char *)ofm->actions;
+                int pos = 0;
+                for(iter = act.begin() ; iter != act.end(); iter++) {
+                    ofp_hdr = (struct ofp_action_header *)iter->get();
+                    memcpy(data+pos, iter->get(), ntohs(ofp_hdr->len));
+                    pos += ntohs(ofp_hdr->len);
+                }
+                send_openflow_command(datapath_id, &ofm->header, false);
+                return true;
+            }
 
         REGISTER_COMPONENT(Simple_component_factory<homework_dhcp>,
                 homework_dhcp);

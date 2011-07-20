@@ -20,7 +20,7 @@ ppf = pprint.pprint
 import simplejson as json
 
 from nox.webapps.webservice import webservice
-from nox.netapps.dhcp.pydhcp import pydhcp_app
+from nox.netapps.homework_routing.pydhcp import pydhcp_app
 from nox.lib import core, openflow, packet, util
 from nox.lib.packet import ethernet, ipv4
 

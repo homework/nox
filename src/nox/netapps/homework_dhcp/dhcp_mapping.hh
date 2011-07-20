@@ -1,5 +1,5 @@
 #ifndef dhcp_mapping_HH
-#define dhcp_mapping_HH
+#define dhcp_mapping_HH 1
 
 #include "config.h"
 

@@ -23,8 +23,6 @@
 #include "component.hh"
 #include "config.h"
 #include "dhcp_msg.hh"
-#include "dhcp_mapping.hh"
-#include "homework_routing/homework_routing.hh"
 
 //hwdb include files
 #include <hwdb/config.h>
@@ -63,120 +61,133 @@
 
 namespace vigil
 {
-	using namespace std;
-	using namespace vigil::container;
+    using namespace std;
+    using namespace vigil::container;
+    struct nw_hdr {
+        struct ether_header *ether;
+        struct iphdr *ip;
+        union {
+            struct udphdr *udp;
+            struct tcphdr *tcp;
+            struct igmphdr *igmp;
+        };
+        uint8_t *data;
+    };
 
-	/** \brief homework_dhcp
-	 * \ingroup noxcomponents
-	 * 
-	 * @author
-	 * @date
-	 */
-	class homework_dhcp
-		: public Component 
-	{
-		public:
-			/** \brief Constructor of homework_dhcp.
-			 *
-			 * @param c context
-			 * @param node XML configuration (JSON object)
-			 */
-			homework_dhcp(const Context* c, const json_object* node)
-				: Component(c)
-			{}
+    struct dhcp_mapping;
 
-			/** \brief Configure homework_dhcp.
-			 * 
-			 * Parse the configuration, register event handlers, and
-			 * resolve any dependencies.
-			 *
-			 * @param c configuration
-			 */
-			void configure(const Configuration* c);
+    /** \brief homework_dhcp
+     * \ingroup noxcomponents
+     * 
+     * @author
+     * @date
+     */
+    class homework_dhcp
+        : public Component 
+    {
+        public:
+            /** \brief Constructor of homework_dhcp.
+             *
+             * @param c context
+             * @param node XML configuration (JSON object)
+             */
+            homework_dhcp(const Context* c, const json_object* node)
+                : Component(c)
+            {}
 
-			/** \brief Start homework_dhcp.
-			 * 
-			 * Start the component. For example, if any threads require
-			 * starting, do it now.
-			 */
-			void install();
+            /** \brief Configure homework_dhcp.
+             * 
+             * Parse the configuration, register event handlers, and
+             * resolve any dependencies.
+             *
+             * @param c configuration
+             */
+            void configure(const Configuration* c);
 
-			/**
-			 * \brief dhcp packet handler
-			 *
-			 * A generic handler for packet_in events. This hopefully 
-			 * will mature latter to more specific functionality.
-			 */
-			Disposition dhcp_handler(const Event& e);
+            /** \brief Start homework_dhcp.
+             * 
+             * Start the component. For example, if any threads require
+             * starting, do it now.
+             */
+            void install();
 
-			/**
-			 * a method to get the current dhcp mappings.
-			 *
-			 * \return a vector of string that describe each mapping.
-			 */
-			std::vector<std::string> get_dhcp_mapping(); 
+            /**
+             * \brief dhcp packet handler
+             *
+             * A generic handler for packet_in events. This hopefully 
+             * will mature latter to more specific functionality.
+             */
+            Disposition dhcp_handler(const Event& e);
 
-			/** \brief Get instance of homework_dhcp.
-			 * @param c context
-			 * @param component reference to component
-			 */
-			static void getInstance(const container::Context* c, 
-					homework_dhcp*& component);
+            /**
+             * a method to get the current dhcp mappings.
+             *
+             * \return a vector of string that describe each mapping.
+             */
+            std::vector<std::string> get_dhcp_mapping(); 
 
-			/**
-			 * \brief check when new switches join
-			 *
-			 * required in order to get a list of registered switches
-			 */
-			Disposition datapath_join_handler(const Event& e);
+            /** \brief Get instance of homework_dhcp.
+             * @param c context
+             * @param component reference to component
+             */
+            static void getInstance(const container::Context* c, 
+                    homework_dhcp*& component);
 
-			/**
-			 * \brief check when switches leave
-			 *
-			 * required in order to get a list of registered switches
-			 */
-			Disposition datapath_leave_handler(const Event& e);
+            /**
+             * \brief check when new switches join
+             *
+             * required in order to get a list of registered switches
+             */
+            Disposition datapath_join_handler(const Event& e);
 
-		private:
-			bool send_flow_modification (Flow fl, uint32_t wildcard, datapathid datapath_id,
-					uint32_t buffer_id, uint16_t command,
-					uint16_t idle_timeout, 
-					std::vector<boost::shared_array<char> > act);
+            /**
+             * \brief check when switches leave
+             *
+             * required in order to get a list of registered switches
+             */
+            Disposition datapath_leave_handler(const Event& e);
+            ethernetaddr get_mac(ipaddr);
 
-			//datapath storage
-			std::vector<datapathid*> registered_datapath;
-			void insert_hwdb(const char *action, const char *ip, const char *mac, 
-					const char *hostname);
+            bool is_valid_mapping(ipaddr ip, ethernetaddr mac);
+        private:
+            bool send_flow_modification (Flow fl, uint32_t wildcard, datapathid datapath_id,
+                    uint32_t buffer_id, uint16_t command,
+                    uint16_t idle_timeout, 
+                    std::vector<boost::shared_array<char> > act);
 
-			bool add_addr(uint32_t ip);
-			bool del_addr(uint32_t ip);
-			ipaddr select_ip(const ethernetaddr&, uint8_t, uint32_t) ;
-			bool extract_headers(uint8_t *, uint32_t, struct nw_hdr *); 
-			size_t generate_dhcp_reply(uint8_t **ret, struct dhcp_packet  * dhcp, 
-					uint16_t dhcp_len, Flow *flow, uint32_t send_ip,
-					uint8_t dhcp_msg_type, uint32_t lease);
+            //datapath storage
+            std::vector<datapathid*> registered_datapath;
+            void insert_hwdb(const char *action, const char *ip, const char *mac, 
+                    const char *hostname);
 
-			//storage of the ip to mac translation throught the dhcp protocol 
-			std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
-			std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
+            bool add_addr(uint32_t ip);
+            bool del_addr(uint32_t ip);
+            ipaddr select_ip(const ethernetaddr&, uint8_t, uint32_t) ;
+            bool extract_headers(uint8_t *, uint32_t, struct nw_hdr *); 
+            size_t generate_dhcp_reply(uint8_t **ret, struct dhcp_packet  * dhcp, 
+                    uint16_t dhcp_len, Flow *flow, uint32_t send_ip,
+                    uint8_t dhcp_msg_type, uint32_t lease);
 
-			//            size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
-			//                    uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 
-			//                    uint8_t dhcp_msg_type, uint32_t lease);
-			uint32_t find_free_ip(const ipaddr& subnet, int netmask);
-			homework_routing *p_routing;
-			//netmasks
-			cidr_ipaddr routable, non_routable, multicast, init_subnet;
+            //storage of the ip to mac translation throught the dhcp protocol 
+            std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
+            std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
 
-			/* HWDB */
-			RpcConnection rpc;
-			//netlink control  
-			struct nl_sock *sk;        //the socket to talk to netlink
-			int ifindex;               //index of the interface. 
-			// TODO: not sure if this change if 
-			// interfaces go up and down. 
-			ethernetaddr bridge_mac;
-	};
+            //            size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
+            //                    uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 
+            //                    uint8_t dhcp_msg_type, uint32_t lease);
+            uint32_t find_free_ip(const ipaddr& subnet, int netmask);
+            //netmasks
+            cidr_ipaddr routable, non_routable, multicast, init_subnet;
+
+            /* HWDB */
+            RpcConnection rpc;
+            //netlink control  
+            struct nl_sock *sk;        //the socket to talk to netlink
+            int ifindex;               //index of the interface. 
+            // TODO: not sure if this change if 
+            // interfaces go up and down. 
+            ethernetaddr bridge_mac;
+    };
 }
 
 #endif

@@ -1,22 +1,22 @@
 include ../../../Make.vars 
 
 EXTRA_DIST =\
-			meta.json\
-			_init_.py\
-			pydhcp.i
+	    meta.json\
+	    _init_.py\
+	    pydhcp.i
 
 if PY_ENABLED
 AM_CPPFLAGS += $(PYTHON_CPPFLAGS)
 endif # PY_ENABLED 
 
 pkglib_LTLIBRARIES =\
-					homework_routing.la
+		    homework_routing.la
 
 homework_routing_la_CPPFLAGS = $(AM_CPPFLAGS) -I $(top_srcdir)/src/nox \
-							   -I $(top_srcdir)/src/nox/netapps/
+			       -I $(top_srcdir)/src/nox/netapps/
 homework_routing_la_SOURCES = homework_routing.hh homework_routing.cc dhcp_msg.hh \
-							  dhcp_proxy.cc dhcp_proxy.hh
-homework_routing_la_LDFLAGS = -module -export-dynamic -lhwdb 
+			      dhcp_proxy.cc dhcp_proxy.hh
+homework_routing_la_LDFLAGS = -module -export-dynamic /usr/lib/libhwdb.la
 
 NOX_RUNTIMEFILES = meta.json
 
@@ -27,7 +27,7 @@ pydhcp_wrap.cc pydhcp.py: pydhcp.i
 
 pkglib_LTLIBRARIES += _pydhcp.la
 _pydhcp_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(top_srcdir)/src/nox -I$(srcdir)/../ -I$(top_builddir)/src/nox/
-_pydhcp_la_SOURCES = dhcp_proxy.cc dhcp_proxy.hh dhcp.hh #dhcp.cc
+_pydhcp_la_SOURCES = dhcp_proxy.cc dhcp_proxy.hh homework_routing.hh
 nodist__pydhcp_la_SOURCES = pydhcp_wrap.cc
 
 _pydhcp_la_LDFLAGS = -module
