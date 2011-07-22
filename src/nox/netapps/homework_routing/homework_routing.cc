@@ -512,15 +512,15 @@ namespace vigil
             //checkin proper output port by checkin the dst mac and ip
             if(this->routable.matches(ipaddr(ntohl(flow.nw_dst))) ) {
                 //destination is local
-                //required assumption for  packet destined to the bridged intf. 
-                if((flow.dl_dst == this->bridge_mac)) {
-                    dst_port = 0;
+                //required assumption for  packet destined to the bridged intf.
+                if((ntohl(flow.nw_dst) & 0x1) == 0x1) {
+                    dst_port = 1;
                     //required properties for a packet to be destined to one of the internal hosts.
                 //TODO: what if the destination is not allowed to talk?
                 } else {
                     //output to port 1
                     lg.info("packet destined to port 1");
-                    dst_port = 1;
+                    dst_port = 0;
                 }
             } else {
                 dst_port = 0;
@@ -639,18 +639,15 @@ namespace vigil
             }
         }
 
-    void 
+    void
         homework_routing::revoke_mac_access(const ethernetaddr& ether) {
-            //struct dhcp_mapping *state = NULL;
             ofp_flow_mod* ofm;
             size_t size = sizeof(ofp_flow_mod);
-            vector<datapathid *>::iterator it; 
-            //state = this->mac_mapping[ether];
-
+            vector<datapathid *>::iterator it;
             boost::shared_array<char> raw_of(new char[size]);
+
             ofm = (ofp_flow_mod*) raw_of.get();
             bzero(ofm, size);
-            //TODO: also send fm command to remove all flows. 
             ofm->header.version = OFP_VERSION;
             ofm->header.type = OFPT_FLOW_MOD;
             ofm->header.length = htons(size);
@@ -660,10 +657,10 @@ namespace vigil
             for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
                 send_openflow_command(**it, &ofm->header, false);
             }
+
             raw_of= boost::shared_array<char> (new char[size]);
             ofm = (ofp_flow_mod*) raw_of.get();
             bzero(ofm, size);
-            //TODO: also send fm command to remove all flows. 
             ofm->header.version = OFP_VERSION;
             ofm->header.type = OFPT_FLOW_MOD;
             ofm->header.length = htons(size);
@@ -672,18 +669,6 @@ namespace vigil
             ofm->command = htons(OFPFC_DELETE);
             for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
                 send_openflow_command(**it, &ofm->header, false);
-            }
-            ofp_header *ofh = NULL;
-            size = sizeof(ofp_header);
-            raw_of= boost::shared_array<char> (new char[size]);
-            ofh = (ofp_header*) raw_of.get();
-            bzero(ofh, size);
-            //TODO: also send fm command to remove all flows. 
-            ofh->version = OFP_VERSION;
-            ofh->type = OFPT_BARRIER_REQUEST;
-            ofh->length = htons(size);
-            for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
-                send_openflow_command(**it, ofh, false);
             }
         }
 
