@@ -16,7 +16,7 @@ homework_routing_la_CPPFLAGS = $(AM_CPPFLAGS) -I $(top_srcdir)/src/nox \
 			       -I $(top_srcdir)/src/nox/netapps/
 homework_routing_la_SOURCES = homework_routing.hh homework_routing.cc dhcp_msg.hh \
 			      dhcp_proxy.cc dhcp_proxy.hh
-homework_routing_la_LDFLAGS = -module -export-dynamic /usr/lib/libhwdb.la
+homework_routing_la_LDFLAGS = -module -export-dynamic -lhwdb
 
 NOX_RUNTIMEFILES = meta.json
 

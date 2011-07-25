@@ -64,10 +64,11 @@
 #include "dhcp_proxy.hh"
 #include "homework_dhcp/homework_dhcp.hh"
 
-
+extern "C" {
 #include <hwdb/srpc.h>
 #include <hwdb/rtab.h>
 #include <hwdb/config.h>
+}
 
 namespace vigil
 {
