@@ -653,6 +653,7 @@ namespace vigil
             ofm->header.length = htons(size);
             ofm->match.wildcards =htonl(~OFPFW_DL_SRC);
             memcpy(ofm->match.dl_src, (const uint8_t *)ether, OFP_ETH_ALEN);
+            ofm->out_port = OFPP_NONE;
             ofm->command = htons(OFPFC_DELETE);
             for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
                 send_openflow_command(**it, &ofm->header, false);
@@ -666,6 +667,7 @@ namespace vigil
             ofm->header.length = htons(size);
             ofm->match.wildcards =htonl(~OFPFW_DL_DST);
             memcpy(ofm->match.dl_dst, (const uint8_t *)ether, OFP_ETH_ALEN);
+            ofm->out_port = OFPP_NONE;
             ofm->command = htons(OFPFC_DELETE);
             for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
                 send_openflow_command(**it, &ofm->header, false);
