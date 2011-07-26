@@ -81,16 +81,16 @@ namespace vigil
         register_handler<Datapath_leave_event>(boost::bind(&homework_routing::datapath_leave_handler, 
                     this, _1));
 
-        /*HWDB*/
-        rpc = NULL;
-        if (!rpc_init(0)) {
-            lg.err("Failure to initialize rpc system");
-            return;
-        }
-        if (!(rpc = rpc_connect(const_cast<char *>(host), port, const_cast<char *>(service), 1l))) {
-            lg.err("Failure to connect to HWDB at %s:%05u", host, port);
-            return;
-        }
+//        /*HWDB*/
+//        rpc = NULL;
+//        if (!rpc_init(0)) {
+//            lg.err("Failure to initialize rpc system");
+//            return;
+//        }
+//        if (!(rpc = rpc_connect(const_cast<char *>(host), port, const_cast<char *>(service), 1l))) {
+//            lg.err("Failure to connect to HWDB at %s:%05u", host, port);
+//            return;
+//        }
         s = socket(AF_INET, SOCK_DGRAM, 0);
         if (s==-1) {
             perror("Failed to open socket");
@@ -157,43 +157,43 @@ namespace vigil
         return CONTINUE;
     }
 
-    void homework_routing::insert_hwdb(const char *action, const char *ip, 
-            const char *mac, const char *hostname) {
-
-        char q[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
-        unsigned int rlen = 0;
-
-        char stsmsg[RTAB_MSG_MAX_LENGTH];
-
-        unsigned int bytes;
-
-        if (!rpc) {
-            //TODO: force reconnect?
-            lg.err("Error: not connected to HWDB.");
-            return;
-        }
-
-        bytes = 0;
-        memset(q, 0, SOCK_RECV_BUF_LEN);
-        bytes += sprintf(q + bytes, "SQL:insert into Leases values (" );
-        /* action */
-        bytes += sprintf(q + bytes, "\"%s\", ", action);
-        /* mac address */
-        bytes += sprintf(q + bytes, "\"%s\", ", mac);
-        /* ip address */
-        bytes += sprintf(q + bytes, "\"%s\", ", ip);
-        /* hostname (optional) */
-        bytes += sprintf(q + bytes, "\"%s\")\n",hostname);
-
-        lg.err( "%s", q);
-        if (! rpc_call(rpc, q, bytes, r, sizeof(r), &rlen)) {
-            lg.err("rpc_call() failed");
-            return;
-        }
-        r[rlen] = '\0';
-        if (rtab_status(r, stsmsg))
-            lg.err("RPC error: %s", stsmsg);
-    }
+//     void homework_routing::insert_hwdb(const char *action, const char *ip, 
+//             const char *mac, const char *hostname) {
+// 
+//         char q[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
+//         unsigned int rlen = 0;
+// 
+//         char stsmsg[RTAB_MSG_MAX_LENGTH];
+// 
+//         unsigned int bytes;
+// 
+//         if (!rpc) {
+//             //TODO: force reconnect?
+//             lg.err("Error: not connected to HWDB.");
+//             return;
+//         }
+// 
+//         bytes = 0;
+//         memset(q, 0, SOCK_RECV_BUF_LEN);
+//         bytes += sprintf(q + bytes, "SQL:insert into Leases values (" );
+//         /* action */
+//         bytes += sprintf(q + bytes, "\"%s\", ", action);
+//         /* mac address */
+//         bytes += sprintf(q + bytes, "\"%s\", ", mac);
+//         /* ip address */
+//         bytes += sprintf(q + bytes, "\"%s\", ", ip);
+//         /* hostname (optional) */
+//         bytes += sprintf(q + bytes, "\"%s\")\n",hostname);
+// 
+//         lg.err( "%s", q);
+//         if (! rpc_call(rpc, q, bytes, r, sizeof(r), &rlen)) {
+//             lg.err("rpc_call() failed");
+//             return;
+//         }
+//         r[rlen] = '\0';
+//         if (rtab_status(r, stsmsg))
+//             lg.err("RPC error: %s", stsmsg);
+//     }
 
     void homework_routing::getInstance(const Context* c,
             homework_routing*& component)

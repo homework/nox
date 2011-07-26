@@ -64,11 +64,11 @@
 #include "dhcp_proxy.hh"
 #include "homework_dhcp/homework_dhcp.hh"
 
-extern "C" {
-#include <hwdb/srpc.h>
-#include <hwdb/rtab.h>
-#include <hwdb/config.h>
-}
+// extern "C" {
+// #include <hwdb/srpc.h>
+// #include <hwdb/rtab.h>
+// #include <hwdb/config.h>
+// }
 
 namespace vigil
 {
@@ -173,7 +173,7 @@ namespace vigil
                   std::vector<boost::shared_array<char> > act);
           std::vector<std::string> get_dhcp_mapping();
       private:
-          void insert_hwdb(const char *action, const char *ip, const char *mac, const char *hostname);
+//          void insert_hwdb(const char *action, const char *ip, const char *mac, const char *hostname);
           bool check_access(const ethernetaddr& ether);
           bool extract_headers(uint8_t *data, uint32_t data_len, struct nw_hdr *hdr);
           //a pointer to the proxy of the module
@@ -193,7 +193,7 @@ namespace vigil
           std::set<ethernetaddr> mac_blacklist;
 
           /* HWDB */
-          RpcConnection rpc;
+//          RpcConnection rpc;
   };
 }
 
