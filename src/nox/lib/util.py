@@ -34,17 +34,17 @@ from   nox.lib.packet.ipv4 import ipv4
 from   nox.lib.packet.udp import udp 
 from   nox.lib.packet.tcp import tcp 
 from   nox.lib.packet.icmp import icmp 
+from   nox.lib.packet.arp import arp
 
-from twisted.python import log
+import logging
+lg = logging.getLogger('core')
 
 ###############################################################################
 # HELPER FUNCTIONS (NOT REQUIRING ACCESS TO THE CORE)
 ###############################################################################
 
 def __dladdr_check__(addr):
-    if isinstance(addr, basestring) and not (':' in addr):
-        if len(addr) != ethernetaddr.LEN:
-            return None
+    if isinstance(addr, basestring) and len(addr) == ethernetaddr.LEN:
         addr = create_bin_eaddr(addr)
     elif isinstance(addr, basestring) or ((isinstance(addr, long) or isinstance(addr, int)) and addr >= 0):
         addr = create_eaddr(addr)
@@ -75,9 +75,7 @@ def convert_to_eaddr(val):
         return val
     if isinstance(val, array.array):
         val = val.tostring()
-    if isinstance(val, str) and not (':' in val):
-        if len(val) < ethernetaddr.LEN:
-            return None
+    if isinstance(val, str) and len(val) == ethernetaddr.LEN:
         return create_bin_eaddr(val)
     elif isinstance(val, str) or isinstance(val, int) or isinstance(val, long):
         return create_eaddr(val)
@@ -92,14 +90,14 @@ def convert_to_ipaddr(val):
             return a.addr
     return None
 
-def gen_packet_in_cb(handler):
+def gen_packet_in_callback(handler):
     def f(event):
         if event.reason == openflow.OFPR_NO_MATCH:
             reason = openflow.OFPR_NO_MATCH
         elif event.reason == openflow.OFPR_ACTION:
             reason = openflow.OFPR_ACTION
         else:
-            print 'packet_in reason type %u unknown...just passing along' % event.reason
+            lg.warning('packet_in reason type %u unknown...just passing along' % event.reason)
             reason = event.reason
 
         if event.buffer_id == UINT32_MAX:
@@ -110,7 +108,7 @@ def gen_packet_in_cb(handler):
         try:
             packet = ethernet(array.array('B', event.buf))
         except IncompletePacket, e:
-            log.err('Incomplete Ethernet header',system='pyapi')
+            lg.error('Incomplete Ethernet header')
         
         ret = handler(event.datapath_id, event.in_port, reason,
                       event.total_len, buffer_id, packet)
@@ -119,7 +117,7 @@ def gen_packet_in_cb(handler):
         return ret
     return f
 
-def gen_dp_join_cb(handler):
+def gen_datapath_join_callback(handler):
     def f(event):
         attrs = {}
         attrs[core.N_BUFFERS] = event.n_buffers
@@ -142,7 +140,7 @@ def gen_dp_join_cb(handler):
     f.cb = handler
     return f
 
-def gen_dp_leave_cb(handler):
+def gen_datapath_leave_callback(handler):
     def f(event):
         ret = f.cb(event.datapath_id)
         if ret == None:
@@ -151,7 +149,7 @@ def gen_dp_leave_cb(handler):
     f.cb = handler
     return f
 
-def gen_ds_in_cb(handler):
+def gen_desc_stats_in_callback(handler):
     def f(event):
         stats = {}
         stats['mfr_desc'] = event.mfr_desc
@@ -166,7 +164,7 @@ def gen_ds_in_cb(handler):
     f.cb = handler
     return f
 
-def gen_as_in_cb(handler):
+def gen_aggr_stats_in_callback(handler):
     def f(event):
         stats = {}
         stats['packet_count'] = event.packet_count
@@ -179,7 +177,7 @@ def gen_as_in_cb(handler):
     f.cb = handler
     return f
 
-def gen_ps_in_cb(handler):
+def gen_port_stats_in_callback(handler):
     def f(event):
         ports = event.ports 
         ret = f.cb(event.datapath_id, ports)
@@ -189,7 +187,16 @@ def gen_ps_in_cb(handler):
     f.cb = handler
     return f
 
-def gen_ts_in_cb(handler):
+def gen_flow_stats_in_callback(handler):
+    def f(event):
+        ret = f.cb(event.datapath_id, event.flows, event.more, event.xid)
+        if ret == None:
+            return CONTINUE
+        return ret
+    f.cb = handler
+    return f
+
+def gen_table_stats_in_callback(handler):
     def f(event):
         tables = event.tables 
         ret = f.cb(event.datapath_id, tables)
@@ -199,7 +206,7 @@ def gen_ts_in_cb(handler):
     f.cb = handler
     return f
 
-def gen_port_status_cb(handler):
+def gen_port_status_callback(handler):
     def f(event):
         if event.reason == openflow.OFPPR_ADD:
             reason = openflow.OFPPR_ADD
@@ -208,7 +215,7 @@ def gen_port_status_cb(handler):
         elif event.reason == openflow.OFPPR_MODIFY:
             reason = openflow.OFPPR_MODIFY
         else:
-            print 'port_status reason type %u unknown...just passing along' % event.reason
+            lg.warning('port_status reason type %u unknown...just passing along' % event.reason)
             reason = event.reason
 
         config = event.port['config']
@@ -224,7 +231,29 @@ def gen_port_status_cb(handler):
     f.cb = handler
     return f
 
-def gen_switch_mgr_join_cb(handler):
+def gen_flow_mod_callback(handler):
+    def f(event):
+        fm = event.flow_mod
+        ret = f.cb(event.datapath_id, fm['match'], fm['command'], fm['idle_timeout'],
+                   fm['hard_timeout'], fm['buffer_id'], fm['priority'], fm['cookie'])
+        if ret == None:
+            return CONTINUE
+        return ret
+    f.cb = handler
+    return f
+
+def gen_flow_removed_callback(handler):
+    def f(event):
+        ret = f.cb(event.datapath_id, event.flow, event.priority, event.reason,
+                   event.cookie, event.duration_sec, event.duration_nsec,
+                   event.byte_count, event.packet_count)
+        if ret == None:
+            return CONTINUE
+        return ret
+    f.cb = handler
+    return f
+
+def gen_switch_mgr_join_callback(handler):
     def f(event):
         ret = f.cb(event.mgmt_id)
         if ret == None:
@@ -233,9 +262,27 @@ def gen_switch_mgr_join_cb(handler):
     f.cb = handler
     return f
 
-def gen_switch_mgr_leave_cb(handler):
+def gen_switch_mgr_leave_callback(handler):
     def f(event):
         ret = f.cb(event.mgmt_id)
+        if ret == None:
+            return CONTINUE
+        return ret
+    f.cb = handler
+    return f
+
+def gen_barrier_reply_callback(handler):
+    def f(event):
+        ret = f.cb(event.datapath_id, event.xid)
+        if ret == None:
+            return CONTINUE
+        return ret
+    f.cb = handler
+    return f
+
+def gen_error_callback(handler):
+    def f(event):
+        ret = f.cb(event.datapath_id, event.type, event.code, event.data, event.xid)
         if ret == None:
             return CONTINUE
         return ret
@@ -268,8 +315,7 @@ def set_match(attrs):
     if attrs.has_key(core.DL_SRC):
         v = convert_to_eaddr(attrs[core.DL_SRC])
         if v == None:
-            print 'invalid ethernet addr'
-            return None
+            raise RuntimeError('invalid ethernet addr')
         m.set_dl_src(v.octet)
         num_entries += 1
     else:
@@ -278,8 +324,7 @@ def set_match(attrs):
     if attrs.has_key(core.DL_DST):
         v = convert_to_eaddr(attrs[core.DL_DST])
         if v == None:
-            print 'invalid ethernet addr'
-            return None
+            raise RuntimeError('invalid ethernet addr')
         m.set_dl_dst(v.octet)
         num_entries += 1
     else:
@@ -294,8 +339,7 @@ def set_match(attrs):
     if attrs.has_key(core.NW_SRC):
         v = convert_to_ipaddr(attrs[core.NW_SRC])
         if v == None:
-            print 'invalid ip addr'
-            return None
+            raise RuntimeError('invalid ip addr')
         m.nw_src = v
         num_entries += 1
 
@@ -306,8 +350,7 @@ def set_match(attrs):
             elif n_wild >= 0:
                 wildcards |= n_wild << openflow.OFPFW_NW_SRC_SHIFT
             else:
-                print 'invalid nw_src wildcard bit count', n_wild
-                return None
+                raise RuntimeError('invalid nw_src wildcard bit count: %u' % (n_wild,))
             num_entries += 1
     else:
         wildcards = wildcards | openflow.OFPFW_NW_SRC_MASK
@@ -315,8 +358,7 @@ def set_match(attrs):
     if attrs.has_key(core.NW_DST):
         v = convert_to_ipaddr(attrs[core.NW_DST])
         if v == None:
-            print 'invalid ip addr'
-            return None            
+            raise RuntimeError('invalid ip addr')
         m.nw_dst = v
         num_entries += 1
 
@@ -327,8 +369,7 @@ def set_match(attrs):
             elif n_wild >= 0:
                 wildcards |= n_wild << openflow.OFPFW_NW_DST_SHIFT
             else:
-                print 'invalid nw_dst wildcard bit count', n_wild
-                return None
+                raise RuntimeError('invalid nw_dst wildcard bit count: %u' % (n_wild,))
             num_entries += 1
     else:
         wildcards = wildcards | openflow.OFPFW_NW_DST_MASK
@@ -358,8 +399,7 @@ def set_match(attrs):
         wildcards = wildcards | openflow.OFPFW_TP_DST
 
     if num_entries != len(attrs.keys()):
-        print 'undefined flow attribute type in attrs', attrs
-        return None
+        raise RuntimeError('undefined flow attribute type in attrs: %s' % (attrs,))
 
     m.wildcards = c_htonl(wildcards)
     return m
@@ -387,6 +427,7 @@ def extract_flow(ethernet):
         attrs[core.NW_SRC] = p.srcip
         attrs[core.NW_DST] = p.dstip
         attrs[core.NW_PROTO] = p.protocol
+        attrs[core.NW_TOS] = p.tos
         p = p.next
 
         if isinstance(p, udp) or isinstance(p, tcp):
@@ -402,7 +443,11 @@ def extract_flow(ethernet):
     else:
         attrs[core.NW_SRC] = 0
         attrs[core.NW_DST] = 0
-        attrs[core.NW_PROTO] = 0
+        if isinstance(p, arp):
+            attrs[core.NW_PROTO] = p.opcode
+        else:
+            attrs[core.NW_PROTO] = 0
+        attrs[core.NW_TOS] = 0
         attrs[core.TP_SRC] = 0
         attrs[core.TP_DST] = 0
     return attrs

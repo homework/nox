@@ -15,6 +15,10 @@
  * You should have received a copy of the GNU General Public License
  * along with NOX.  If not, see <http://www.gnu.org/licenses/>.
  */
+%{
+#include <cstddef>
+%}
+
 %module "nox.lib.netinet"
 
 %include common-defs.i

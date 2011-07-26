@@ -124,6 +124,7 @@ struct ethernetaddr
     ethernetaddr(uint64_t  id);
     ethernetaddr(const std::string&);
     ethernetaddr(const ethernetaddr&);
+  ~ethernetaddr() {};
 
     // ------------------------------------------------------------------------
     // String Representation

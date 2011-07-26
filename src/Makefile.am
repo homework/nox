@@ -52,7 +52,7 @@ nox_core_LDADD = \
 	$(builddir)/builtin/.libs/libbuiltin.la \
 	$(builddir)/lib/libnoxcore.la \
 	$(LIBADD_DL) \
-	$(LDADD) 
+	$(LDADD) -lboost_system
 
 nox_core_DEPENDENCIES =
 

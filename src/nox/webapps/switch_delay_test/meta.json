@@ -1,0 +1,13 @@
+{
+    "components": [
+        {
+            "name": "switch_delay_test",
+            "dependencies": [
+	         "python",	    
+		 "componentws",
+		 "webservice"
+            ],
+            "python": "nox.webapps.switch_delay_test.switch_delay_test"
+        }
+    ]
+}

@@ -1,0 +1,41 @@
+Parsing files...
+Getting library to name mapping...
+Creating event database
+
+Port_stats_in_event
+Host_location_event
+Host_auth_event
+Flow_removed_event
+User_join_event
+Link_event
+Ofmp_resources_update_event
+Bootstrap_complete_event
+Barrier_reply_event
+Ofmp_config_update_ack_event
+Host_bind_event
+Queue_stats_in_event
+Datapath_leave_event
+JSONMsg_event
+Switch_mgr_join_event
+Echo_request_event
+Flow_in_event
+Table_stats_in_event
+Queue_config_in_event
+Flow_mod_event
+Switch_mgr_leave_event
+Aggregate_stats_in_event
+Port_status_event
+Switch_bind_event
+User_auth_event
+Ofmp_config_update_event
+Principal_delete_event
+Shutdown_event
+Packet_in_event
+Datapath_join_event
+Error_event
+Flow_stats_in_event
+Openflow_msg_event
+Host_join_event
+Msg_event
+Desc_stats_in_event
+Flow_route_event

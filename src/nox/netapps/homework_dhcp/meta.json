@@ -1,0 +1,8 @@
+{
+    "components": [
+        {
+            "name": "homework_dhcp" ,
+            "library": "homework_dhcp" 
+        }
+    ]
+}

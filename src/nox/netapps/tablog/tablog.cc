@@ -366,7 +366,7 @@ namespace vigil
     }
 
     //Check size of file and rotate if needed
-    fs::path p(i->second.filename.c_str(), fs::native);
+    fs::path p(i->second.filename.c_str());
     if (fs::file_size(p) >= i->second.rotate_size)
       file_log_rotate(i->second.filename.c_str(),
 		      i->second.output_header, 
@@ -417,13 +417,13 @@ namespace vigil
     char buf[128];
 
     if (i == -1)
-      return fs::path(filename, fs::native);
+      return fs::path(filename);
       
     sprintf(buf, "%d", i);
     string s = string(buf);
     string r=s.erase(s.find_last_not_of(" ")+1);
     r = string(filename)+"."+r.erase(0,r.find_first_not_of(" "));
-    return fs::path(r.c_str(), fs::native);
+    return fs::path(r.c_str());
   }
   
   void tablog::dump_screen(const char* name, bool clearContent, string d)

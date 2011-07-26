@@ -38,13 +38,17 @@
 #include "desc-stats-in.hh"
 #include "table-stats-in.hh"
 #include "port-stats-in.hh"
+#include "flow-stats-in.hh"
+#include "queue-stats-in.hh"
 #include "flow-mod-event.hh"
 #include "flow-removed.hh"
 #include "packet-in.hh"
 #include "port-status.hh"
+#include "barrier-reply.hh"
 #include "pyevent.hh"
 #include "pyglue.hh"
 #include "shutdown-event.hh"
+#include "error-event.hh"
 
 #include "dso-deployer.hh"
 #include "fault.hh"
@@ -249,6 +253,30 @@ static void convert_port_stats_in(const Event& e, PyObject* proxy) {
     ((Event*)SWIG_Python_GetSwigThis(proxy)->ptr)->operator=(e);
 }
 
+static void convert_flow_stats_in(const Event& e, PyObject* proxy) {
+  const Flow_stats_in_event& fsi
+               = dynamic_cast<const Flow_stats_in_event&>(e);
+  
+  pyglue_setattr_string(proxy, "xid", to_python(fsi.xid()));
+  pyglue_setattr_string(proxy, "datapath_id", to_python(fsi.datapath_id));
+  pyglue_setattr_string(proxy, "more", to_python(fsi.more));
+  pyglue_setattr_string(proxy, "flows"    , to_python<vector<Flow_stats> >(fsi.flows));
+  // Check whether an empty flow list should really be empty
+  pyglue_setattr_string(proxy, "flowcount", to_python(fsi.flows.size()));
+
+  ((Event*)SWIG_Python_GetSwigThis(proxy)->ptr)->operator=(e);
+}
+
+static void convert_queue_stats_in(const Event& e, PyObject* proxy) {
+  const Queue_stats_in_event& qsi
+               = dynamic_cast<const Queue_stats_in_event&>(e);
+  pyglue_setattr_string(proxy, "xid", to_python(qsi.xid()));
+  pyglue_setattr_string(proxy, "datapath_id", to_python(qsi.datapath_id));
+  pyglue_setattr_string(proxy, "queues"    , to_python<vector<Queue_stats> >(qsi.queues));
+
+  ((Event*)SWIG_Python_GetSwigThis(proxy)->ptr)->operator=(e);
+}
+
 static void convert_datapath_leave(const Event&e, PyObject* proxy) {
     const Datapath_leave_event& dple = 
         dynamic_cast<const Datapath_leave_event&>(e);
@@ -265,6 +293,9 @@ static void convert_bootstrap_complete(const Event&e, PyObject* proxy) {
 static void convert_flow_removed(const Event& e, PyObject* proxy) {
     const Flow_removed_event& fre = dynamic_cast<const Flow_removed_event&>(e);
 
+    pyglue_setattr_string(proxy, "datapath_id", to_python(fre.cookie));
+    pyglue_setattr_string(proxy, "priority", to_python(fre.priority));
+    pyglue_setattr_string(proxy, "reason", to_python(fre.reason));
     pyglue_setattr_string(proxy, "cookie", to_python(fre.cookie));
     pyglue_setattr_string(proxy, "duration_sec", to_python(fre.duration_sec));
     pyglue_setattr_string(proxy, "duration_nsec", to_python(fre.duration_nsec));
@@ -312,6 +343,36 @@ static void convert_port_status(const Event& e, PyObject* proxy) {
 
 static void convert_shutdown(const Event& e, PyObject* proxy) {
     //const Shutdown_event& se = dynamic_cast<const Shutdown_event&>(e);
+
+    ((Event*)SWIG_Python_GetSwigThis(proxy)->ptr)->operator=(e);
+}
+
+static void convert_barrier_reply(const Event& e, PyObject *proxy) {
+    const Barrier_reply_event &bre = dynamic_cast<const Barrier_reply_event&>(e);
+
+    pyglue_setattr_string(proxy, "datapath_id", to_python(bre.datapath_id));
+    pyglue_setattr_string(proxy, "xid", to_python(bre.xid()));
+
+    ((Event*)SWIG_Python_GetSwigThis(proxy)->ptr)->operator=(e);
+}
+
+static void convert_error(const Event& e, PyObject* proxy) {
+    const Error_event& ee = dynamic_cast<const Error_event&>(e);
+
+    pyglue_setattr_string(proxy, "datapath_id", to_python(ee.datapath_id));
+    pyglue_setattr_string(proxy, "xid",      to_python(ee.xid()));
+    pyglue_setattr_string(proxy, "type",     to_python(ee.type));
+    pyglue_setattr_string(proxy, "code",     to_python(ee.code));
+
+    size_t data_len = ee.get_buffer()->size();
+    if (data_len < sizeof(ofp_error_msg))
+        data_len = 0;
+    else
+        data_len -= sizeof(ofp_error_msg);
+
+    pyglue_setattr_string(proxy, "data",
+        Py_BuildValue((char*)"s#",
+            ee.get_buffer()->data() + sizeof(ofp_error_msg), data_len));
 
     ((Event*)SWIG_Python_GetSwigThis(proxy)->ptr)->operator=(e);
 }
@@ -460,6 +521,14 @@ PyRt::PyRt(const Context* c,
                              &convert_aggregate_stats_in);
     register_event_converter(Desc_stats_in_event::static_get_name(), 
                              &convert_desc_stats_in);
+    register_event_converter(Flow_stats_in_event::static_get_name(), 
+                             &convert_flow_stats_in);
+    register_event_converter(Queue_stats_in_event::static_get_name(),
+                             &convert_queue_stats_in);
+    register_event_converter(Barrier_reply_event::static_get_name(),
+                             &convert_barrier_reply);
+    register_event_converter(Error_event::static_get_name(),
+                             &convert_error);
 }
 
 void

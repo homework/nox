@@ -14,6 +14,7 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with NOX.  If not, see <http://www.gnu.org/licenses/>.
+
 import logging
 import array
 import struct
@@ -54,6 +55,13 @@ CAPABILITES = 'caps'
 ACTIONS     = 'actions'
 PORTS       = 'ports'
 
+TABLE_ID    = 'table_id'
+NAME        = 'name'
+MAX_ENTRIES = 'max_entries'
+ACTIVE_COUNT = 'active_count'
+LOOKUP_COUNT = 'lookup_count'
+MATCHED_COUNT = 'matched_count'
+
 PORT_NO     = 'port_no'
 SPEED       = 'speed'
 CONFIG      = 'config'
@@ -63,6 +71,37 @@ ADVERTISED  = 'advertised'
 SUPPORTED   = 'supported'
 PEER        = 'peer'
 HW_ADDR     = 'hw_addr'
+
+RX_PACKETS = 'rx_packets'
+TX_PACKETS = 'tx_packets'
+RX_BYTES   = 'rx_bytes'
+TX_BYTES   = 'tx_bytes'
+RX_DROPPED = 'rx_dropped'
+TX_DROPPED = 'tx_dropped'
+RX_ERRORS  = 'rx_errors'
+TX_ERRORS  = 'tx_errors'
+RX_FRAME_ERROR = 'rx_frame_error'
+RX_OVER_ERROR = 'rx_over_error'
+RX_CRC_ERROR = 'rx_crc_error'
+COLLISIONS = 'collisions'
+
+PACKET_COUNT = 'packet_count'
+BYTE_COUNT = 'byte_count'
+FLOW_COUNT = 'flow_count'
+
+MATCH = 'match'
+COOKIE = 'cookie'
+DUR_SEC = 'duration_sec'
+DUR_NSEC = 'duration_nsec'
+PRIORITY = 'priority'
+IDLE_TO = 'idle_timeout'
+HARD_TO = 'hard_timeout'
+
+MFR_DESC = 'mfr_desc'
+HW_DESC = 'hw_desc'
+SW_DESC = 'sf_desc'
+DP_DESC = 'dp_desc'
+SERIAL_NUM = 'serial_num'
 
 ################################################################################
 # API NOTES:
@@ -82,7 +121,7 @@ HW_ADDR     = 'hw_addr'
 ###########################################################################
 
 class Component: 
-    """Abstract class to inherited by all Python components.
+    """\brief Abstract class to inherited by all Python components.
     \ingroup noxapi
     """
     def __init__(self, ctxt):
@@ -90,30 +129,38 @@ class Component:
         self.component_names = None 
 
     def configure(self, config):
-        """Configure the component.
+        """\brief Configure the component.
         Once configured, the component has parsed its configuration and
-        resolve any references to other components it may have.
+        resolved any references with other components it may have.
+
+        @param config configuration dictionary
         """
         pass
 
     def install(self):
-        """Install the component. 
+        """\brief Install the component.
         Once installed, the component runs and is usable by other
         components.
         """
         pass
 
     def getInterface(self):
-        """Return the interface (class) component provides.  The default
-        implementation returns the class itself."""
+        """\brief Return the interface (class) component provides.
+        The default implementation returns the class itself.
+        """
         return self.__class__
 
     def resolve(self, interface):
         return self.ctxt.resolve(str(interface))    
 
-    # Interface to allow components to check at runtime without having
-    # to import them (which will cause linking errors)
-    def is_component_loaded(self, name):    
+    def is_component_loaded(self, name):
+        """\brief Check if a component is loaded.
+        Allow components to check at runtime whether or not others
+        are loaded without having to import them (which causes
+        linking errors).
+
+        @param name name of the component
+        """
         if not self.component_names:
             self.component_names = []
             for component in self.ctxt.get_kernel().get_all():
@@ -127,6 +174,15 @@ class Component:
         return self.ctxt.register_python_event(event_name)
 
     def register_handler(self, event_name, handler):
+        """\brief Register an event handler.
+
+        The handler will be called with: handler(event).
+        'event' is a dictionary containing data for the
+         specific event.
+
+        @param event_name name of the event
+        @param handler handler function
+        """
         return self.ctxt.register_handler(event_name, handler)
 
     def post_timer(self, event):
@@ -141,39 +197,50 @@ class Component:
 
     def make_action_array(self, actions):
         action_str = ""
-        
+
         for action in actions:
-            if action[0] == openflow.OFPAT_OUTPUT \
-                    and isinstance(action[1],list) \
-                    and len(action[1]) == 2:
-                a = struct.pack("!HHHH", action[0], 8,
-                                action[1][1], action[1][0])
+            args_expected = 2
+            if action[0] == openflow.OFPAT_OUTPUT:
+                if type(action[1]) == int or type(action[1]) == long:
+                    a = struct.pack("!HHHH", action[0], 8,
+                                    action[1], 0)
+                else:
+                    a = struct.pack("!HHHH", action[0], 8,
+                                    action[1][1], action[1][0])
             elif action[0] == openflow.OFPAT_SET_VLAN_VID:
                 a = struct.pack("!HHHH", action[0], 8, action[1], 0)
             elif action[0] == openflow.OFPAT_SET_VLAN_PCP:
                 a = struct.pack("!HHBBH", action[0], 8, action[1], 0, 0)
             elif action[0] == openflow.OFPAT_STRIP_VLAN:
+                args_expected = 1
                 a = struct.pack("!HHI", action[0], 8, 0)
             elif action[0] == openflow.OFPAT_SET_DL_SRC \
                     or action[0] == openflow.OFPAT_SET_DL_DST:
                 eaddr = convert_to_eaddr(action[1])
                 if eaddr == None:
-                    print 'invalid ethernet addr'
-                    return None
-                a = struct.pack("!HH6sHI", action[0], 16, eaddr.binary_str(), 0, 0)
+                    raise RuntimeError('invalid ethernet addr')
+                a = struct.pack("!HH6sHI", action[0], 16,
+                                eaddr.binary_str(), 0, 0)
             elif action[0] == openflow.OFPAT_SET_NW_SRC \
                     or action[0] == openflow.OFPAT_SET_NW_DST:
                 iaddr = convert_to_ipaddr(action[1])
                 if iaddr == None:
-                    print 'invalid ip addr'
-                    return None
-                a = struct.pack("HHI", htons(action[0]), htons(8), htonl(ipaddr(iaddr).addr))
+                    raise RuntimeError('invalid ip addr')
+                a = struct.pack("!HHI", action[0], 8, ipaddr(iaddr).addr)
             elif action[0] == openflow.OFPAT_SET_TP_SRC \
                     or action[0] == openflow.OFPAT_SET_TP_DST:
                 a = struct.pack("!HHHH", action[0], 8, action[1], 0)
+            elif action[0] == openflow.OFPAT_SET_NW_TOS:
+                a = struct.pack("!HHBBBB", action[0], 8, action[1], 0, 0, 0)
+            elif action[0] == openflow.OFPAT_ENQUEUE:
+                a = struct.pack("!HHHHHHI", action[0], 16, action[1][0],
+                                0,0,0, action[1][1])
             else:
-                print 'invalid action type', action[0]
-                return None
+                raise RuntimeError('invalid action type: ' + str(action[0]))
+
+            if len(action) != args_expected:
+                raise RuntimeError('action %s expected %s arguments',
+                                    action[0], args_expected)
 
             action_str = action_str + a
 
@@ -184,8 +251,7 @@ class Component:
             addr = create_eaddr(str(hwaddr)) 
             return self.ctxt.send_port_mod(dpid, portno, addr, mask, config)
         except Exception, e:    
-            print e
-            #lg.error("unable to send port mod"+str(e))
+            raise RuntimeError("unable to send port mod:" + str(e))
 
     def send_switch_command(self, dpid, command, arg_list):
         return self.ctxt.send_switch_command(dpid, command, ",".join(arg_list))
@@ -197,15 +263,25 @@ class Component:
         return self.ctxt.switch_update(dpid)
             
 
+    def send_openflow_command(self, dp_id, packet):
+        """\brief Send an openflow command packet to a datapath.
+
+        @param dp_id datapath to send packet to
+        @param packet data to put in openflow packet
+        """
+        if type(packet) == type(array.array('B')):
+            packet = packet.tostring()
+
+        self.ctxt.send_openflow_command(dp_id, packet)
+
     def send_openflow_packet(self, dp_id, packet, actions, 
                              inport=openflow.OFPP_CONTROLLER):
-        """
-        sends an openflow packet to a datapath
+        """\brief Send an openflow packet to a datapath.
 
-        dp_id - datapath to send packet to
-        packet - data to put in openflow packet
-        actions - list of actions or dp port to send out of
-        inport - dp port to mark as source (defaults to Controller port)
+        @param dp_id datapath to send packet to
+        @param packet data to put in openflow packet
+        @param actions list of actions or dp port to send out of
+        @param inport dp port to mark as source (defaults to Controller port)
         """
         if type(packet) == type(array.array('B')):
             packet = packet.tostring()
@@ -222,13 +298,12 @@ class Component:
 
     def send_openflow_buffer(self, dp_id, buffer_id, actions, 
                              inport=openflow.OFPP_CONTROLLER):
-        """
-        Tells a datapath to send out a buffer
+        """\brief Tell a datapath to send out a buffer.
         
-        dp_id - datapath to send packet to
-        buffer_id - id of buffer to send out
-        actions - list of actions or dp port to send out of
-        inport - dp port to mark as source (defaults to Controller port)
+        @param dp_id datapath to send packet to
+        @param buffer_id id of buffer to send out
+        @param actions list of actions or dp port to send out of
+        @param inport dp port to mark as source (defaults to Controller port)
         """
         if type(actions) == types.IntType:
             self.ctxt.send_openflow_buffer_port(dp_id, buffer_id, actions,
@@ -273,8 +348,7 @@ class Component:
 
     def send_openflow(self, dp_id, buffer_id, packet, actions,
                       inport=openflow.OFPP_CONTROLLER):
-        """
-        Sends an openflow packet to a datapath.
+        """\brief Send an openflow packet to a datapath.
 
         This function is a convenient wrapper for send_openflow_packet
         and send_openflow_buffer for situations where it is unknown in
@@ -282,49 +356,22 @@ class Component:
         'buffer_id' is -1, it sends 'packet'; otherwise, it sends the
         buffer represented by 'buffer_id'.
 
-        dp_id - datapath to send packet to
-        buffer_id - id of buffer to send out
-        packet - data to put in openflow packet
-        actions - list of actions or dp port to send out of
-        inport - dp port to mark as source (defaults to Controller
-                 port)
+        @param dp_id datapath to send packet to
+        @param buffer_id id of buffer to send out
+        @param packet data to put in openflow packet
+        @param actions list of actions or dp port to send out of
+        @param inport dp port to mark as source (defaults to Controller port)
         """
         if buffer_id != None:
             self.send_openflow_buffer(dp_id, buffer_id, actions, inport)
         else:
             self.send_openflow_packet(dp_id, packet, actions, inport)
 
-    def delete_datapath_flow(self, dp_id, attrs):
-        """
-        Delete all flow entries matching the passed in (potentially
-        wildcarded) flow
-
-        dp_id - datapath to delete the entries from
-        attrs - the flow as a dictionary (described above)
-        """
-        return self.send_flow_command(dp_id, openflow.OFPFC_DELETE, attrs)
-
-    def delete_strict_datapath_flow(self, dp_id, attrs, 
-                        priority=openflow.OFP_DEFAULT_PRIORITY):
-        """
-        Strictly delete the flow entry matching the passed in (potentially
-        wildcarded) flow.  i.e. matched flow have exactly the same
-        wildcarded fields.
-        
-        dp_id - datapath to delete the entries from
-        attrs - the flow as a dictionary (described above)
-        priority - the priority of the entry to be deleted (only meaningful 
-                   for entries with wildcards)
-        """
-        return self.send_flow_command(dp_id, openflow.OFPFC_DELETE_STRICT, 
-                                      attrs, priority)
-
     ###########################################################################
     # The following methods manipulate a flow entry in a datapath.
     # A flow is defined by a dictionary containing 0 or more of the
     # following keys (commented keys have already been defined above):
     # 
-    
     # DL_SRC     = "dl_src"
     # DL_DST     = "dl_dst"
     # DL_VLAN    = "dl_vlan"
@@ -336,41 +383,65 @@ class Component:
     # TP_SRC     = "tp_src"
     # TP_DST     = "tp_dst"
     #
-    # Absent keys are interpretted as wildcards
+    # Absent keys are interpretted as wildcards.
     ###########################################################################
+
+    def delete_datapath_flow(self, dp_id, attrs):
+        """\brief Delete all flow entries matching the passed in (potentially
+        wildcarded) flow.
+
+        @param dp_id datapath to delete the entries from
+        @param attrs the flow as a dictionary (described above)
+        """
+        return self.send_flow_command(dp_id, openflow.OFPFC_DELETE, attrs)
+
+    def delete_strict_datapath_flow(self, dp_id, attrs,
+                        priority=openflow.OFP_DEFAULT_PRIORITY):
+        """\brief Strictly delete the flow entry matching the passed in
+        (potentially wildcarded) flow.
+
+        Strict matching means that they have they also have the
+        same wildcarded fields.
+
+        @param dp_id datapath to delete the entries from
+        @param attrs the flow as a dictionary (described above)
+        @param priority the priority of the entry to be deleted
+          (only meaningful for entries with wildcards)
+        """
+        return self.send_flow_command(dp_id, openflow.OFPFC_DELETE_STRICT,
+                                      attrs, priority)
 
     def install_datapath_flow(self, dp_id, attrs, idle_timeout, hard_timeout,
                               actions, buffer_id=None, 
                               priority=openflow.OFP_DEFAULT_PRIORITY,
                               inport=None, packet=None):
-        """
-        Add a flow entry to datapath
+        """\brief Add a flow entry to datapath.
 
-        dp_id - datapath to add the entry to
+        @param dp_id datapath to add the entry to
 
-        attrs - the flow as a dictionary (described above)
+        @param attrs the flow as a dictionary (described above)
 
-        idle_timeout - # idle seconds before flow is removed from dp
+        @param idle_timeout # idle seconds before flow is removed from dp
 
-        hard_timeout - # of seconds before flow is removed from dp
+        @param hard_timeout # of seconds before flow is removed from dp
 
-        actions - a list where each entry is a two-element list representing
+        @param actions a list where each entry is a two-element list representing
         an action.  Elem 0 of an action list should be an ofp_action_type
         and elem 1 should be the action argument (if needed). For
         OFPAT_OUTPUT, this should be another two-element list with max_len
         as the first elem, and port_no as the second
 
-        buffer_id - the ID of the buffer to apply the action(s) to as well.
+        @param buffer_id the ID of the buffer to apply the action(s) to as well.
         Defaults to None if the actions should not be applied to a buffer
 
-        priority - when wildcards are present, this value determines the
+        @param priority when wildcards are present, this value determines the
         order in which rules are matched in the switch (higher values
         take precedence over lower ones)
 
-        packet - If buffer_id is None, then a data packet to which the
+        @param packet If buffer_id is None, then a data packet to which the
         actions should be applied, or None if none.
 
-        inport - When packet is sent, the port on which packet came in as input,
+        @param inport When packet is sent, the port on which packet came in as input,
         so that it can be omitted from any OFPP_FLOOD outputs.
         """
         if buffer_id == None:
@@ -382,198 +453,235 @@ class Component:
         if buffer_id == UINT32_MAX and packet != None:
             for action in actions:
                 if action[0] == openflow.OFPAT_OUTPUT:
-                    self.send_openflow_packet(dp_id, packet, action[1][1], inport)
+                    if type(action[1]) == int or type(action[1]) == long:
+                        self.send_openflow_packet(dp_id, packet, action[1], inport)
+                    else:
+                        self.send_openflow_packet(dp_id, packet, action[1][1], inport)
                 else:
                     raise NotImplementedError
 
     def register_for_packet_in(self, handler):
-        """
-        register a handler to be called on every packet_in event
-        handler will be called with the following args:
-        
-        handler(dp_id, inport, ofp_reason, total_frame_len, buffer_id,
-        captured_data)
-        
-        'buffer_id' == None if the datapath does not have a buffer for
-        the frame
+        """\brief Register a handler for a packet in event.
+
+        The handler will be called with:
+        handler(dpid, in_port, reason, total_frame_len, buffer_id, captured_data)
+
+        \note 'dpid' is the datapath id of the switch.
+        \note 'in_port' is the port on which the packet arrived.
+        \note 'reason' is the reason for the packet in (see ofp_reason).
+        \note 'total_frame_len' is the packet length.
+        \note 'buffer_id' is the buffer id assigned by the switch,
+        \note  or -1 if the entire packet was sent.
+        \note 'captured_data' is the packet data.
+
+        @param handler the handler function
         """
         self.register_handler(Packet_in_event.static_get_name(),
-                              gen_packet_in_cb(handler))
+                              gen_packet_in_callback(handler))
 
     def register_for_flow_removed(self, handler):
+        """\bref Register a handler for flow removed events.
+
+        The handler will be called with:
+         handler(dpid, attrs, priority, reason, cookie, dur_sec,
+                dur_nsec, byte_count, packet_count)
+
+        \note 'dpid' is the datapath id of the switch.
+        \note 'attrs' is a flow dictionary (see comment above)
+        \note 'priority' is the flow's priority
+        \note 'reason' why the flow was removed (see ofp_flow_removed_reason)
+        \note 'cookie' is the flow's cookie
+        \note 'dur_sec' is how long the flow was alive in (s).
+        \note 'dur_nsec' is how long the flow was alive beyond dur_sec in (ns).
+        \note 'byte_count' is the number of bytes passed through this flow.
+        \note 'packet_count' is the number of packets passed through this flow.
+        @param handler the hander function
+        """
         self.register_handler(Flow_removed_event.static_get_name(),
-                              handler)
+                              gen_flow_removed_callback(handler))
 
     def register_for_flow_mod(self, handler):
+        """\bref Register a handler for flow mod events.
+
+        The handler will be called with:
+         handler(dpid, attrs, command, idle_to, hard_to, buffer_id,
+                 priority, cookie)
+
+        \note 'dpid' is the datapath id of the switch.
+        \note 'attrs' is a flow dictionary (see comment above)
+        \note 'command' is the type of flow mod (see ofp_flow_mod_command)
+        \note 'idle_to' is the idle timeout of the flow
+        \note 'hard_to' is the hard timeout of the flow
+        \note 'buffer_id' is a buffer id assigned by the switch, or -1 if
+        \note  there is no buffer. (This is not meaningful for OFPFC_DELETE command).
+        \note 'priority' is the flow's priority
+        \note 'cookie' is the flow's cookie
+
+        @param handler the hander function
+        """
         self.register_handler(Flow_mod_event.static_get_name(),
-                              handler)
+                              gen_flow_mod_callback(handler))
 
     def register_for_bootstrap_complete(self, handler):
+        """\brief Register a handler for bootstrap complete events.
+
+        The handler will be called with: handler(event).
+
+        \note 'event' is a dictionary for a bootstrap complete event.
+
+        @param handler the handler function
+        """
+
         self.register_handler(Bootstrap_complete_event.static_get_name(),
                               handler)
 
-    ################################################################################
-    # register a handler to be called on a every switch_features event
-    # handler will be called with the following args:
-    #
-    # handler(dp_id, attrs)
-    #
-    # attrs is a dictionary with the following keys:
-
-
-    # the PORTS value is a list of port dictionaries where each dictionary
-    # has the keys listed in the register_for_port_status message
-    ################################################################################
-
     def register_for_datapath_join(self, handler):
-        self.register_handler(Datapath_join_event.static_get_name(),
-                              gen_dp_join_cb(handler))
+        """\brief Register a handler for a datapath join event.
 
-    ################################################################################
-    # register a handler to be called whenever table statistics are
-    # returned by a switch.
-    #
-    # handler will be called with the following args:
-    #
-    # handler(dp_id, stats)
-    #
-    # Stats is a dictionary of table stats with the following keys:
-    #
-    #   "table_id"
-    #   "name"
-    #   "max_entries"
-    #   "active_count"
-    #   "lookup_count"
-    #   "matched_count"
-    #
-    # XXX
-    #
-    # We should get away from using strings here eventually.
-    #
-    ################################################################################
+        The handler will be called with: handler(dpid, attrs).
+
+        \note 'dpid' is the datapath id of the switch
+        \note 'attrs' is a dictionary with the following keys:
+        \note \n
+        \note   N_BUFFERS, N_TABLES, CAPABILITIES, ACTIONS, PORTS
+
+        \note The PORTS value is a list of port dictionaries where each
+        \note dictionary has the keys listed in the register_for_port_status
+        \note documentation.
+
+        @param handler the handler function
+        """
+        self.register_handler(Datapath_join_event.static_get_name(),
+                              gen_datapath_join_callback(handler))
 
     def register_for_table_stats_in(self, handler):
-        self.register_handler(Table_stats_in_event.static_get_name(),
-                              gen_ts_in_cb(handler))
+        """\brief Register a handler for flow stats in events.
 
-    ################################################################################
-    # register a handler to be called whenever port statistics are
-    # returned by a switch.
-    #
-    # handler will be called with the following args:
-    #
-    # handler(dp_id, stats)
-    #
-    # Stats is a dictionary of port stats with the following keys:
-    #
-    #   "port_no"
-    #   "rx_packets"
-    #   "tx_packets"
-    #   "rx_bytes"
-    #   "tx_bytes"
-    #   "rx_dropped"
-    #   "tx_dropped"
-    #   "rx_errors"
-    #   "tx_errors"
-    #   "rx_frame_err"
-    #   "rx_over_err"
-    #   "rx_crc_err"
-    #   "collisions"
-    #
-    ################################################################################
+        The handler will be called with: handler(dpid, stats).
+
+        \note 'dpid' is the datapath id of the switch
+        \note 'stats' is a list of dictionaries (one for each table)
+        \note with the keys:
+        \note \n
+        \note   TABLE_ID, NAME, MAX_ENTRIES, ACTIVE_COUNT,
+        \note   LOOKUP_COUNT, MAX_COUNT
+
+        @param handler the handler function
+        """
+        self.register_handler(Table_stats_in_event.static_get_name(),
+                              gen_table_stats_in_callback(handler))
 
     def register_for_port_stats_in(self, handler):
+        """\brief Register a handler for port stats in events.
+
+        The handler will be called with: handler(dpid, stats).
+
+        \note 'dpid' is the datapath id of the switch
+        \note 'stats' is a list of dictionaries (one for each port)
+        \note   with the keys:
+        \note \n
+        \note   PORT_NO, RX_PACKETS, TX_PACKETS, RX_BYTES, TX_BYTES
+        \note   RX_DROPPED, TX_DROPPED, RX_ERRORS, TX_ERRORS,
+        \note   RX_FRAME_ERR, RX_OVER_ERROR, RX_CRC_ERROR, COLLISIONS
+
+        @param handler the handler function
+        """
         self.register_handler(Port_stats_in_event.static_get_name(),
-                              gen_ps_in_cb(handler))
-
-
-    ################################################################################
-    # register a handler to be called whenever table aggregate
-    # statistics are returned by a switch.
-    #
-    # handler will be called with the following args:
-    #
-    # handler(dp_id, stats)
-    #
-    # Stats is a dictionary of aggregate stats with the following keys:
-    #
-    #   "packet_count"
-    #   "byte_count"
-    #   "flow_count"
-    #
-    ################################################################################
+                              gen_port_stats_in_callback(handler))
 
     def register_for_aggregate_stats_in(self, handler):
+        """\brief Register a handler for aggregate stats in events.
+
+        The handler will be called with: handler(dpid, stats).
+
+        \note 'dpid' is the datapath id of the switch
+        \note 'stats' is a dictionary of aggregate stats with the keys:
+        \note \n
+        \note    PACKET_COUNT, BYTE_COUNT, FLOW_COUNT
+
+        @param handler the handler function
+        """
         self.register_handler(Aggregate_stats_in_event.static_get_name(),
-                              gen_as_in_cb(handler))
+                              gen_aggr_stats_in_callback(handler))
 
+    def register_for_flow_stats_in(self, handler):
+        """\brief Register a handler for flow stats in events.
 
-    ################################################################################
-    # register a handler to be called whenever description
-    # statistics are returned by a switch.
-    #
-    # handler will be called with the following args:
-    #
-    # handler(dp_id, stats)
-    #
-    # Stats is a dictionary of descriptions with the following keys:
-    #
-    #   "mfr_desc"
-    #   "hw_desc"
-    #   "sw_desc"
-    #   "serial_num"
-    #
-    ################################################################################
+        The handler will be called with: handler(dpid, flows, more, xid).
+
+        \note 'dpid' is the datapath id of the switch
+        \note 'flows' is a list of dictionaries (one for each flow) with keys:
+        \note \n
+        \note   TABLE_ID, MATCH, COOKIE, DUR_SEC, DUR_NSEC, PRIORITY,
+        \note   IDLE_TO, HARD_TO, PACKET_COUNT, BYTE_COUNT
+        \note \n
+        \note 'more' is a bool indicating whether or not the switch still has more
+        \note  flow stats to send.
+
+        'xid' is the request id in the packet header.\n
+
+        @param handler the handler function
+        """
+        self.register_handler(Flow_stats_in_event.static_get_name(),
+                              gen_flow_stats_in_callback(handler))
 
     def register_for_desc_stats_in(self, handler):
+        """\brief Register a handler for description stats in events.
+
+        The handler will be called with: handler(dpid, stats).
+
+         \note 'dpid' is the datapath id of the switch
+         \note 'stats' is a dictionary with keys:
+         \note \n
+         \note  MFR_DESC, HW_DESC, SW_DESC, DP_DESC, SERIAL_NUM
+
+        @param handler the handler function
+        """
         self.register_handler(Desc_stats_in_event.static_get_name(),
-                              gen_ds_in_cb(handler))
+                              gen_desc_stats_in_callback(handler))
 
     def register_for_datapath_leave(self, handler):
-        """
-        register a handler to be called on a every datapath_leave
-        event handler will be called with the following args:
+        """\brief Register a handler for datapath leave events.
+
+        The handler will be called with: handler(dpid).
+
+        \note 'dpid' is the datapath id of the switch
         
-        handler(dp_id)
+        @param handler the handler function
         """
         self.register_handler(Datapath_leave_event.static_get_name(),
-                              gen_dp_leave_cb(handler))
+                              gen_datapath_leave_callback(handler))
 
-    ##########################################################################
-    # register a handler to be called on a every port_status event
-    # handler will be called with the following args:
-    #
-    # handler(dp_id, ofp_port_reason, attrs)
-    #
-    # attrs is a dictionary with the following keys:
-        
-
-    ###########################################################################
     def register_for_port_status(self, handler):
+        """\brief Register a handler for port status events.
+
+        The handler will be called with: handler(dpid, reason, port).
+
+        \note 'dpid' is the datapath id of the switch
+        \note 'reason' is the reason for the event (see ofp_port_reason).
+        \note 'port' is a dictionary for the port with some convenience
+        \note   bool fields added ('link', 'enabled', 'flood')
+
+        @param handler the handler function
+        """
         self.register_handler(Port_status_event.static_get_name(),
-                              gen_port_status_cb(handler))
-
-    ###########################################################################
-    # register a handler to be called on every packet_in event matching
-    # the passed in expression.
-    #
-    # priority - the priority the installed classifier rule should have
-    # expr - a dictionary containing 0 or more of the following keys.
-        
-
-    # Absent keys will be interpretted as wildcards (i.e. any value is
-    # accepted for those attributes when checking for a potential match)
-    #
-    # handler will be called with the following args:
-    #
-    # handler(dp_id, inport, ofp_reason, total_frame_len, buffer_id,
-    # captured_data)
-    #
-    # 'buffer_id' == None if the datapath does not have a buffer for
-    # the frame
-    ###########################################################################
+                              gen_port_status_callback(handler))
 
     def register_for_packet_match(self, handler, priority, expr):
+        """\brief Register a handler for every packet in event matching
+        the passed in expression.
+
+        The handler will be called with:
+         handler(dpid, in_port, reason, total_frame_len, buffer_id, captured_data)
+
+       \note For an explanation of these arguments, see the documentation for
+       \note register_for_packet_in. In this case, 'buffer_id' == None if the
+       \note datapath does not have a buffer for the frame.
+
+        @param handler the handler function
+        @param priority the priority the installed classifier rule should have
+        @param expr the flow match as a dictionary (see comment above).
+        """
         e = Packet_expr()
         for key, val in expr.items():
             if key == AP_SRC:
@@ -595,26 +703,22 @@ class Component:
                 field = Packet_expr.DL_SRC
                 val = convert_to_eaddr(val)
                 if val == None:
-                    print 'invalid ethernet addr'
-                    return False
+                    raise RuntimeError('invalid ethernet addr')
             elif key == DL_DST:
                 field = Packet_expr.DL_DST
                 val = convert_to_eaddr(val)
                 if val == None:
-                    print 'invalid ethernet addr'
-                    return False
+                    raise RuntimeError('invalid ethernet addr')
             elif key == NW_SRC:
                 field = Packet_expr.NW_SRC
                 val = convert_to_ipaddr(val)
                 if val == None:
-                    print 'invalid ip addr'
-                    return False
+                    raise RuntimeError('invalid ip addr')
             elif key == NW_DST:
                 field = Packet_expr.NW_DST
                 val = convert_to_ipaddr(val)
                 if val == None:
-                    print 'invalid ip addr'
-                    return False
+                    raise RuntimeError('invalid ip addr')
             elif key == NW_PROTO:
                 field = Packet_expr.NW_PROTO
             elif key == TP_SRC:
@@ -630,39 +734,66 @@ class Component:
                 field = Packet_expr.GROUP_DST
                 val = htonl(val)
             else:
-                print 'invalid key', key
-                return False
+                raise RuntimeError('invalid key: %s' % (key,))
         
             if isinstance(val, ethernetaddr):
                 e.set_eth_field(field, val)
             else:
                 # check for max?
                 if val > UINT32_MAX:
-                    print 'value %u exceeds accepted range', val
-                    return False
+                    raise RuntimeError('value %u exceeds accepted range:' % (val, ))
                 e.set_uint32_field(field, val)
 
-        return self.ctxt.register_handler_on_match(gen_packet_in_cb(handler), priority, e)
+        return self.ctxt.register_handler_on_match(gen_packet_in_callback(handler), priority, e)
 
     def register_for_switch_mgr_join(self, handler):
-        """
-        register a handler to be called on every switch_mgr_join
-        event handler will be called with the following args:
-        
-        handler(mgmt_id)
+        """\brief Register a handler for switch manager join events.
+
+        The handler will be called with: handler(mgmt_id).
+
+        @param handler the handler function
         """
         self.register_handler(Switch_mgr_join_event.static_get_name(),
-                              gen_switch_mgr_join_cb(handler))
+                              gen_switch_mgr_join_callback(handler))
 
     def register_for_switch_mgr_leave(self, handler):
-        """
-        register a handler to be called on every switch_mgr_leave
-        event handler will be called with the following args:
-        
-        handler(mgmt_id)
+        """\brief Register a handler for switch manager leave events.
+
+        The handler will be called with: handler(mgmt_id).
+
+        @param handler the handler function
         """
         self.register_handler(Switch_mgr_leave_event.static_get_name(),
-                              gen_switch_mgr_leave_cb(handler))
+                              gen_switch_mgr_leave_callback(handler))
+
+    def register_for_barrier_reply(self, handler):
+        """\brief Register a handler for barrier reply events.
+
+        The handler will be called with: handler(dpid, xid).
+
+        \note 'dpid' is the datapath id of the switch.
+        \note 'xid' is the xid of the barrier request and reply.
+
+        @param handler the handler function
+        """
+        self.register_handler(Barrier_reply_event.static_get_name(),
+                              gen_barrier_reply_callback(handler))
+
+    def register_for_error(self, handler):
+        """\brief Register a handler for error events.
+
+        The handler will be called with: handler(dpid, type, code, data, xid).
+
+        \note 'dpid' is the datapath id of the switch.
+        \note 'type' is the error type.
+        \note 'code' is more specific and depends on 'type'.
+        \note 'data' is any data returned with the error message.
+        \note 'xid' is the xid of the error message.
+
+        @param handler the handler function
+        """
+        self.register_handler(Error_event.static_get_name(),
+                              gen_error_callback(handler))
 
     def unregister_handler(self, rule_id):
         """

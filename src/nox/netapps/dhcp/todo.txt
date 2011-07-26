@@ -1,0 +1,30 @@
+OK 1) Test how bridging will work.
+2) Test dhcp code.
+OK   - How the ip assignment work? Do I get unique ips? Do I get the same ip if I ask again? Develop test scenarios with the python script that does fake dhcp requests. (works so far in assinging unique ip's. Current setup has small lease times)
+OK   - How can I query homework module and know if a mac address is allowed to get an ip.(fixed a function on the proxy class)
+OK   - Develop a web service to get the assignment status of the dhcp server.  (returns a json array of string represtations of the mappings)
+OK   - How can I invalidate an IP address? (Better create a function in the dhcp module that recalls all flow configuration and define the lease time before now) - the switch creates some default rules that  can never invalidate. BY removing the ip though libnl I can achieve better results.
+   - Timeout ip leases. Check on packet_in handling if the ip address is timed out and revoke all structures.
+OK   - Increase lease time for routable ips
+OK   - On dhcprequest, answer with an nack if the proposed ip is not the one I am planning to server in the end. 
+
+3) Perform a test with arp poisonning.
+   - Can two client communicate if they both know their mac address?
+   - Can I detect something like this? 
+   - check if somebody is trying to communicate without the switch and see how I can detect that by sniffing data. 
+   
+4) Improve switching
+   - if a packet is between 2 local and routable ip's I can make openvswitch to move the packet instead of the br0 module. Beware I need to insert rule for mac translation.
+   - Keep track of the mac address of the br0 interface in order to do the mac conversion. 
+
+6) Port mapping
+   - In order to make more self containable the code, keep port for each mac address in its state. 
+ 
+5) Test dhcp code with different clients:
+   - Linux (check what dhcp clients are there? Maybe check also older versions? )
+   - Windows (windows, vista and windows 7)
+   - MAC osx (also ipad, iphone)
+   - game machine (PS3? )
+   - android (expected to be the same as linux )
+   - busybox dhcp implementation (Expected on some embeded linux devices)
+   - 

@@ -1,0 +1,19 @@
+{
+    "components": [
+    {
+        "name": "homework_routing" ,
+         "dependencies": [
+            "homework_dhcp"
+            ],
+           "library": "homework_routing" 
+    },
+    {
+        "name": "pydhcp" ,
+        "dependencies": [
+            "homework_routing"
+            ],
+        "python": "nox.netapps.homework_routing.pydhcp"
+    }
+
+    ]
+}

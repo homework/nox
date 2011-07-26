@@ -96,6 +96,8 @@ struct ipaddr
     ipaddr(const uint8_t*);
     ipaddr(const sockaddr&);
     explicit ipaddr(const std::string&);
+  ~ipaddr() {};
+
 
     // ------------------------------------------------------------------------
     // String Representation

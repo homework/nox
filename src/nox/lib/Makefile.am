@@ -13,7 +13,8 @@ EXTRA_DIST =\
 	directory.py\
 	directory_factory.py\
 	registries.py\
-	utf8_string.i
+	utf8_string.i\
+	pyopenflow.py
 
 if PY_ENABLED
 AM_CPPFLAGS += $(PYTHON_CPPFLAGS)
@@ -39,18 +40,18 @@ _config_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(top_srcdir)/src/nox
 NOX_RUNTIMEFILES = \
 	core.py\
 	__init__.py\
-	openflow.py\
-	config.py\
 	util.py\
 	token_bucket.py\
 	directory.py\
 	directory_factory.py\
 	registries.py\
-	utf8_string.i
+	utf8_string.i\
+	pyopenflow.py
 
 NOX_PYBUILDFILES = \
 	openflow.py \
-	config.py
+	config.py\
+	pyopenflow.py
 
 NOX_PYLIBFILES = \
    _openflow.so\

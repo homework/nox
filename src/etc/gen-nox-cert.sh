@@ -10,8 +10,26 @@ if [ ! -e $1/noxca.cnf ]; then
      exit 127
 fi
 
-openssl genrsa -passout pass:INSECURE -des3 -out noxca.key 2048 >& 2 
-chmod 0700 noxca.key
-openssl rsa    -passin  pass:INSECURE -in noxca.key -out noxca.key.insecure >& 2 
-chmod 0700 noxca.key.insecure
-openssl req    -config $1/noxca.cnf -new -x509 -days 1001 -key noxca.key.insecure -out noxca.cert >& 2 
+#generate new ca key
+if [ ! -d demoCA ]; then
+    $1/CA.pl  -newca
+fi
+
+#generate new nox key and sign it
+if [ ! -e noxca.crt ] || [ -e noxca.key ] ; then
+    $1/CA.pl  -newreq-nodes -sign
+    mv newcert.pem noxca.crt
+    mv newkey.pem noxca.key
+    rm newreq.pem
+    $1/CA.pl -verify noxca.crt
+fi
+
+#save ca certification in order to verify client keys
+cp demoCA/cacert.pem  ca.pem
+
+#./CA.pl -newreq-nodes -sign -pkcs12
+#mv newcert.pem client.crt
+#mv newkey.pem client.key
+#mv newcert.p12 client.p12
+#cat client.key client.crt > client.pem
+

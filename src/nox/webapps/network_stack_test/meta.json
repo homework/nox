@@ -1,0 +1,13 @@
+{
+    "components": [
+        {
+            "name": "network_stack_test",
+            "dependencies": [
+	         "python",	    
+		 "componentws",
+		 "webservice"
+            ],
+            "python": "nox.webapps.network_stack_test.network_stack_test"
+        }
+    ]
+}
