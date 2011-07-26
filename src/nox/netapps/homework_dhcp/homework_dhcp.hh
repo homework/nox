@@ -60,7 +60,6 @@ extern "C" {
 
 #include <boost/shared_ptr.hpp>
 
-
 namespace vigil
 {
     using namespace std;
@@ -151,7 +150,8 @@ namespace vigil
             ethernetaddr get_mac(ipaddr);
 
             bool is_valid_mapping(ipaddr ip, ethernetaddr mac);
-        private:
+            void clean_leases();
+       private:
             bool send_flow_modification (Flow fl, uint32_t wildcard, datapathid datapath_id,
                     uint32_t buffer_id, uint16_t command,
                     uint16_t idle_timeout, 
@@ -174,12 +174,9 @@ namespace vigil
             std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
             std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
 
-            //            size_t generate_dhcp_reply(uint8_t **buf, struct dhcp_packet  *dhcp, 
-            //                    uint16_t dhcp_len, Flow *flow, uint32_t send_ip, 
-            //                    uint8_t dhcp_msg_type, uint32_t lease);
             uint32_t find_free_ip(const ipaddr& subnet, int netmask);
             //netmasks
-            cidr_ipaddr routable, non_routable, multicast, init_subnet;
+            cidr_ipaddr routable;
 
             /* HWDB */
             RpcConnection rpc;

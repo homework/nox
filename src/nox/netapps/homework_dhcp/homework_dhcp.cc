@@ -24,21 +24,10 @@ const char *dhcp_msg_type_name[] = {NULL, "DHCPDiscover", "DHCPOffer",
                     "DHCPNak", "DHCPRelease", "DHCPInform"};
 #define BRIDGE_INTERFACE_NAME "br0"
 
-#define MAX_ROUTABLE_LEASE 1800
-#define MAX_NON_ROUTABLE_LEASE 30
+#define MAX_ROUTABLE_LEASE 2400
 
 #define ROUTABLE_SUBNET "10.2.0.0"
 #define ROUTABLE_NETMASK 16
-
-#define NON_ROUTABLE_SUBNET "10.3.0.0"
-#define NON_ROUTABLE_NETMASK 16
-
-#define MULTICAST_SUBNET "224.0.0.0"
-#define MULTICAST_NETMASK 4
-
-#define INIT_SUBNET "10.4.0.0"
-#define INIT_NETMASK 16
-
 
 namespace vigil
 {
@@ -46,11 +35,7 @@ namespace vigil
 
     void homework_dhcp::configure(const Configuration* c) {
         lg.dbg(" Configure called ");
-
         this->routable = cidr_ipaddr(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK);
-        this->non_routable = cidr_ipaddr(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK);
-        this->init_subnet = cidr_ipaddr(ipaddr(INIT_SUBNET), INIT_NETMASK); 
-        this->multicast = cidr_ipaddr(ipaddr(MULTICAST_SUBNET), MULTICAST_NETMASK);
     }
 
     void homework_dhcp::install() {
@@ -68,17 +53,17 @@ namespace vigil
 
         //initialiaze and connect the socket to the netlink socket
         if((this->sk = nl_socket_alloc()) == NULL) {
-            perror("socket alloc");
+            lg.err("socket alloc");
             exit(1);
         }
         if(nl_connect(sk, NETLINK_ROUTE) != 0) {
-            perror("nl connect");
+            lg.err("nl connect");
             exit(1);
         }
 
         //looking the index of the bridge  
         if ( (rtnl_link_alloc_cache(sk, &cache) ) != 0) {
-            perror("link alloc cache");
+            lg.err("link alloc cache");
             exit(1);
         }
 
@@ -86,28 +71,32 @@ namespace vigil
             perror("Failed to translate interface name to int");
             exit(1);
         }
-        printf("Retrieving ix %d for intf %s\n", this->ifindex, BRIDGE_INTERFACE_NAME);
+        lg.info("Retrieving ix %d for intf %s", this->ifindex, BRIDGE_INTERFACE_NAME);
 
-       register_handler<Packet_in_event>(boost::bind(&homework_dhcp::dhcp_handler, 
+        register_handler<Packet_in_event>(boost::bind(&homework_dhcp::dhcp_handler, 
                     this, _1));
         register_handler<Datapath_join_event>(boost::bind(&homework_dhcp::datapath_join_handler, 
                     this, _1));
         register_handler<Datapath_leave_event>(boost::bind(&homework_dhcp::datapath_leave_handler, 
                     this, _1));
-
+       
+        // Setup a timer event to check when  when leases expire.
+        struct timeval tv = {60,0};
+        post(boost::bind(&homework_dhcp::clean_leases, this), tv);
+        
         rpc = NULL;
         if (!rpc_init(0)) {
-            fprintf(stderr, "Failure to initialize rpc system\n");
+            lg.err("Failure to initialize rpc system");
             return;
         }
         if (!(rpc = rpc_connect(const_cast<char *>(host), port, const_cast<char *>(service), 1l))) {
-            fprintf(stderr, "Failure to connect to HWDB at %s:%05u\n", host, port);
+            lg.err("Failure to connect to HWDB at %s:%05u", host, port);
             return;
         }
 
         s = socket(AF_INET, SOCK_DGRAM, 0);
         if (s==-1) {
-            perror("Failed to open socket");
+            lg.err("Failed to open socket");
             exit(1);
         }
 
@@ -115,17 +104,41 @@ namespace vigil
         strncpy(ifr.ifr_name, BRIDGE_INTERFACE_NAME, sizeof(BRIDGE_INTERFACE_NAME));
 
         if(ioctl(s, SIOCGIFHWADDR, &ifr) < 0) {
-            perror("Failed to get mac address");
+            lg.err("Failed to get mac address");
             exit(1);
         }
         memcpy(addr, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
 
         this->bridge_mac = ethernetaddr(addr);
-        printf("br0 mac addr : %s\n", this->bridge_mac.string().c_str());
+        lg.info("br0 mac addr : %s", this->bridge_mac.string().c_str());
         close(s);
 
         lg.dbg(" Install called ");
     }
+
+    void homework_dhcp::clean_leases() {
+        map<ipaddr, struct dhcp_mapping *>::iterator it = this->ip_mapping.begin();
+        struct timeval now;
+
+        gettimeofday(&now, NULL);
+        for(; it != this->ip_mapping.end() ; it++) {
+            //add 30 minutes extra on the lease, so that we are on the safe side
+            if(it->second->lease_end == 0)
+                continue;
+            if(it->second->lease_end <= now.tv_sec + 0.2*MAX_ROUTABLE_LEASE) {
+                it->second->lease_end = 0;
+                lg.info("releasing ip %s", it->second->ip.string().c_str());
+                insert_hwdb("del", it->second->ip.string().c_str(), it->second->mac.string().c_str(), 
+                        "NULL");
+
+            }
+        }
+
+        timeval tv = {60,0};
+        // TODO: Maybe best to control the timeval by calculating which is expected to go next.
+        post(boost::bind(&homework_dhcp::clean_leases, this), tv);
+    }
+
 
     void homework_dhcp::insert_hwdb(const char *action, const char *ip, 
             const char *mac, const char *hostname) {
@@ -138,7 +151,7 @@ namespace vigil
         unsigned int bytes;
 
         if (!rpc) {
-            fprintf(stderr, "Error: not connected to HWDB.\n");
+            lg.err("Error: not connected to HWDB.");
             return;
         }
 
@@ -156,12 +169,12 @@ namespace vigil
 
         fprintf(stderr, "%s", q);
         if (! rpc_call(rpc, q, bytes, r, sizeof(r), &rlen)) {
-            fprintf(stderr, "rpc_call() failed\n");
+            lg.err("rpc_call() failed");
             return;
         }
         r[rlen] = '\0';
         if (rtab_status(r, stsmsg))
-            fprintf(stderr, "RPC error: %s\n", stsmsg);
+            lg.err( "RPC error: %s", stsmsg);
     }
 
     /////////////////////////////////////
@@ -176,7 +189,6 @@ namespace vigil
      * */
     Disposition homework_dhcp::datapath_join_handler(const Event& e) {
         const Datapath_join_event& pi = assert_cast<const Datapath_join_event&>(e);
-        printf("joining switch with datapath id : %s\n", pi.datapath_id.string().c_str());
         this->registered_datapath.push_back( new datapathid(pi.datapath_id));
 
         std::vector<boost::shared_array<char> > act;
@@ -193,6 +205,7 @@ namespace vigil
         ofp_act_out->max_len = htons(2000);
 
         //force to forward dhcp traffic to the controller
+        //this is required, because otherwise, we won't get full payloaded packet
         wildcard = ~(OFPFW_DL_TYPE | OFPFW_NW_PROTO | OFPFW_TP_SRC | OFPFW_TP_DST); 
         flow.dl_type = ethernet::IP;
         flow.nw_proto = ip_::proto::UDP;
@@ -206,7 +219,6 @@ namespace vigil
 
     Disposition homework_dhcp::datapath_leave_handler(const Event& e) {
         const Datapath_leave_event& pi = assert_cast<const Datapath_leave_event&>(e);
-        printf("leaving switch with datapath id : %s\n", pi.datapath_id.string().c_str());
         vector<datapathid *>::iterator it;
         for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
             if(pi.datapath_id == (const datapathid& )(**it)) {
@@ -221,32 +233,33 @@ namespace vigil
     Disposition homework_dhcp::dhcp_handler(const Event& e) {
         const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
         Flow flow(pi.in_port, *(pi.get_buffer()));
-        // for some reason events are only fired for this action when nox 
-        // sees udp traffic. 
+        boost::shared_array<char> buf;
+
+
         if( (flow.dl_type != ethernet::IP) ||
                 (flow.nw_proto != ip_::proto::UDP) ||
                 (ntohs(flow.tp_dst) != 67) || 
-                (ntohs(flow.tp_src) != 68)) {
-        
-            lg.dbg("flow %s not dhcp. skipping.", flow.to_string().c_str());
+                (ntohs(flow.tp_src) != 68)) 
             return CONTINUE;
-        }  
 
         uint8_t *data = pi.get_buffer()->data(), *reply = NULL;
         int32_t data_len = pi.get_buffer()->size();
         int pointer = 0;
+        char *hostname = NULL;
 
+        //remove extra headers from data section of packet
         struct nw_hdr hdr;
         if(!this->extract_headers(data, data_len, &hdr)) {
             lg.err("malformed dhcp packet");
         }
-        uint16_t dhcp_len = ntohs(hdr.udp->len) - sizeof(struct udphdr);
 
-        //printf("header size:%d\n",  (hdr.data - data));
+        //calculate the dhcp packet len from the udp len field
+        uint16_t dhcp_len = ntohs(hdr.udp->len) - sizeof(struct udphdr);
 
         pointer = (hdr.data - data);
         data_len -= (hdr.data - data);
 
+        //extract the options of the packet
         struct dhcp_packet *dhcp = (struct dhcp_packet  *)hdr.data;
 
         //analyse options and reply respectively.
@@ -256,24 +269,32 @@ namespace vigil
         //get the exact message type of the dhcp request
         uint8_t dhcp_msg_type = 0;
         uint32_t requested_ip = dhcp->ciaddr;
+
+        //parse dhcp option
         while(data_len > 2) {
             uint8_t dhcp_option = data[pointer];
             uint8_t dhcp_option_len = data[pointer+1];
 
             if(dhcp_option == 0xff) {
-                //printf("Got end of options!!!!\n");
                 break;
             } else if(dhcp_option == 53) {
                 dhcp_msg_type = data[pointer + 2];
                 if((dhcp_msg_type <1) || (dhcp_msg_type > 8)) {
-                    lg.err("Invalid DHCP Message Type : %d\n", dhcp_msg_type);
+                    lg.err("Invalid DHCP Message Type : %d", dhcp_msg_type);
                     return STOP;
                 } 
             }else if(dhcp_option == 50) {
                 memcpy(&requested_ip, data + pointer + 2, 4);
                 struct in_addr in;
                 in.s_addr = requested_ip;
-                printf("requested ip : %s\n", inet_ntoa(in));
+                lg.dbg("requested ip : %s", inet_ntoa(in));
+            } else if(dhcp_option == 12) {
+
+                buf = boost::shared_array<char>(new char[dhcp_option_len + 1]);
+                hostname = buf.get();
+                memset(hostname, '\0', dhcp_option_len + 1);
+                memcpy(hostname, (data + pointer + 2), dhcp_option_len);
+                lg.info("hostname (%d): %s", strlen(hostname), hostname);
             }
 
             data_len -=(2 + dhcp_option_len );
@@ -281,42 +302,52 @@ namespace vigil
         }
 
         if(dhcp_msg_type == DHCPINFORM) {
+            //TODO: we shoulf be replying with a DHCPACK on this one. 
             return STOP;
         } else if(dhcp_msg_type == DHCPDECLINE){
+            // the server receives a DHCPDECLINE message, the client has discovered 
+            // through some other means that the suggested network address is already in use.
             return STOP;
         }
 
-        //Must create a fucntion that chooses this ip for the state of the DHCP server. 
+        //choose the ip we will send to a specific host. 
         ipaddr send_ip = this->select_ip(ethernetaddr(hdr.ether->ether_shost), dhcp_msg_type, 
                 ntohl(requested_ip));
-        bool is_routable = (this->routable.matches(send_ip) || this->init_subnet.matches(send_ip)); 
-        //ip_matching(ipaddr(ROUTABLE_SUBNET),ROUTABLE_NETMASK, ntohl((uint32_t)send_ip))||
-        //(this->ip_matching(ipaddr(INIT_SUBNET),INIT_NETMASK, ntohl((uint32_t)send_ip))));
-        bool is_init = this->init_subnet.matches(send_ip);
 
-        //TODO: if ip is routable, add ip to the interface
-        if(is_routable) {
-            this->add_addr(ntohl((uint32_t)send_ip) + 1);
-        } else {
-            printf("ip %s is not routable\n", send_ip.string().c_str());
+        if(dhcp_msg_type == DHCPRELEASE){ 
+            if(this->mac_mapping.find(ethernetaddr(flow.dl_src)) == this->mac_mapping.end())
+                return STOP;
+            this->mac_mapping[ethernetaddr(flow.dl_src)]->lease_end = 0;
+            lg.info("releasing ip %s", send_ip.string().c_str());
+            insert_hwdb("del", send_ip.string().c_str(), flow.dl_src.string().c_str(), 
+                    (hostname)?hostname:"NULL");
+            return STOP;
         }
 
+        //if ip is routable, add ip to the interface
+        this->add_addr(ntohl((uint32_t)send_ip) + 1);
+
+        //depending of the message type, choose reply msg
         uint8_t reply_msg_type = (dhcp_msg_type == DHCPDISCOVER?DHCPOFFER:DHCPACK);
 
+        //if the client send a request for a specific adress and we don't agree with that, we
+        //send a NACK and force the client to discover a new ip from scratch
         if( (requested_ip != 0)  &&
                 ((dhcp_msg_type == DHCPREQUEST) && 
                  (requested_ip != (uint32_t)send_ip))){
             struct in_addr in;
             in.s_addr = send_ip;
-            printf("DHCPNACK: requested ip differ from send_ip %s\n", inet_ntoa(in));
+            lg.info("DHCPNACK: requested ip differ from send_ip %s", inet_ntoa(in));
             reply_msg_type = DHCPNAK;
             send_ip = requested_ip;
         }
         size_t len = 
             generate_dhcp_reply(&reply, dhcp, dhcp_len, &flow, ntohl((uint32_t)send_ip), reply_msg_type, 
-                    (is_routable&& !is_init)?MAX_ROUTABLE_LEASE:MAX_NON_ROUTABLE_LEASE);
+                    MAX_ROUTABLE_LEASE);
 
-        insert_hwdb("add", send_ip.string().c_str(), flow.dl_src.string().c_str(), "NULL");
+        if(reply_msg_type == DHCPACK)
+            insert_hwdb("add", send_ip.string().c_str(), flow.dl_src.string().c_str(), 
+                    (hostname)?hostname:"NULL");
 
         send_openflow_packet(pi.datapath_id, Array_buffer(reply, len), 
                 OFPP_IN_PORT, pi.in_port, 1);
@@ -335,20 +366,20 @@ namespace vigil
             if((iter_ip = this->ip_mapping.find(ipaddr(ip + 1))) == this->ip_mapping.end()) 
                 break;
 
-            //if the lease has ended for less than 5 minutes then keep the mapping just in case
-            if( tv.tv_sec - iter_ip->second->lease_end < 5*60 )
-                continue;
-
-            //if everything above passed then we have to invalidate this mapping and keep the ip addr
-            if(iter_ip->second != NULL) {
-                ether = iter_ip->second->mac;
-                delete iter_ip->second;
-            }
-            this->ip_mapping.erase(ip + 1);
-            if(this->mac_mapping.find(ether) != this->mac_mapping.end()) {
-                this->mac_mapping.erase(ether);
-            }
-            break;
+            //            //if the lease has ended for less than 5 minutes then keep the mapping just in case
+            //            if( tv.tv_sec - iter_ip->second->lease_end < 5*60 )
+            //                continue;
+            //
+            //            //if everything above passed then we have to invalidate this mapping and keep the ip addr
+            //            if(iter_ip->second != NULL) {
+            //                ether = iter_ip->second->mac;
+            //                delete iter_ip->second;
+            //            }
+            //            this->ip_mapping.erase(ip + 1);
+            //            if(this->mac_mapping.find(ether) != this->mac_mapping.end()) {
+            //                this->mac_mapping.erase(ether);
+            //            }
+            //            break;
         }
 
         //run out of availiable ip
@@ -598,8 +629,7 @@ namespace vigil
         *((uint32_t *)(options + 2)) = htonl(lease); 
         options += 6;
         // if this is a NAK, we don't need to set the other fields
-        if((dhcp_msg_type == DHCPNAK) || this->non_routable.matches(send_ip)) {
-            //                ip_matching(ipaddr(NON_ROUTABLE_SUBNET), NON_ROUTABLE_NETMASK, ipaddr(send_ip))) { 
+        if(dhcp_msg_type == DHCPNAK) {
             options[0] = 0xff; 
             return len;
         }
@@ -621,112 +651,112 @@ namespace vigil
         //set end of options
         options[0] = 0xff;
         return len;
+    }
+
+    bool homework_dhcp::extract_headers(uint8_t *data, uint32_t data_len, struct nw_hdr *hdr) {
+        uint32_t pointer = 0;
+
+        if(data_len < sizeof( struct ether_header))
+            return false;
+
+        // parse ethernet header
+        hdr->ether = (struct ether_header *) data;
+        pointer += sizeof( struct ether_header);
+        data_len -=  sizeof( struct ether_header);
+
+        // parse ip header
+        if(data_len < sizeof(struct iphdr))
+            return false;
+        hdr->ip = (struct iphdr *) (data + pointer);
+        if(data_len < hdr->ip->ihl*4) 
+            return false;
+        pointer += hdr->ip->ihl*4;
+        data_len -= hdr->ip->ihl*4;
+
+        //parse udp header
+        if(hdr->ip->protocol == ip_::proto::UDP) {
+            hdr->udp = (struct udphdr *)(data + pointer);
+            hdr->data = data + pointer + sizeof(struct udphdr);    
+        } else if(hdr->ip->protocol == ip_::proto::TCP) {
+            hdr->tcp = (struct tcphdr *)(data + pointer);
+            hdr->data = data + pointer + (hdr->tcp->doff*4);
+        } else if(hdr->ip->protocol == ip_::proto::IGMP) {
+            hdr->igmp = (struct igmphdr *)(data + pointer);
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    ethernetaddr
+        homework_dhcp::get_mac(ipaddr ip) {
+            ethernetaddr ret;
+            if(this->ip_mapping.find(ip) != this->ip_mapping.end())
+                return this->ip_mapping[ip]->mac;
+            return ret;
         }
 
-        bool homework_dhcp::extract_headers(uint8_t *data, uint32_t data_len, struct nw_hdr *hdr) {
-            uint32_t pointer = 0;
 
-            if(data_len < sizeof( struct ether_header))
+    bool
+        homework_dhcp::is_valid_mapping(ipaddr ip, ethernetaddr mac) {
+            if(this->ip_mapping.find(ip) == this->ip_mapping.end()) {
                 return false;
+            } else
+                return (mac == (this->ip_mapping[ip]->mac));
+        }
 
-            // parse ethernet header
-            hdr->ether = (struct ether_header *) data;
-            pointer += sizeof( struct ether_header);
-            data_len -=  sizeof( struct ether_header);
 
-            // parse ip header
-            if(data_len < sizeof(struct iphdr))
-                return false;
-            hdr->ip = (struct iphdr *) (data + pointer);
-            if(data_len < hdr->ip->ihl*4) 
-                return false;
-            pointer += hdr->ip->ihl*4;
-            data_len -= hdr->ip->ihl*4;
+    bool
+        homework_dhcp::send_flow_modification (Flow flow, uint32_t wildcard,  datapathid datapath_id,
+                uint32_t buffer_id, uint16_t command, uint16_t timeout,
+                std::vector<boost::shared_array<char> > act) {
 
-            //parse udp header
-            if(hdr->ip->protocol == ip_::proto::UDP) {
-                hdr->udp = (struct udphdr *)(data + pointer);
-                hdr->data = data + pointer + sizeof(struct udphdr);    
-            } else if(hdr->ip->protocol == ip_::proto::TCP) {
-                hdr->tcp = (struct tcphdr *)(data + pointer);
-                hdr->data = data + pointer + (hdr->tcp->doff*4);
-            } else if(hdr->ip->protocol == ip_::proto::IGMP) {
-                hdr->igmp = (struct igmphdr *)(data + pointer);
-            } else {
-                return false;
+            std::vector< boost::shared_array<char> >::iterator iter;
+            ofp_flow_mod* ofm;
+            size_t size = sizeof(*ofm);
+            struct ofp_action_header *ofp_hdr;
+
+            for(iter = act.begin() ; iter != act.end(); iter++) {
+                ofp_hdr = (struct ofp_action_header *)iter->get();
+                size += ntohs(ofp_hdr->len);
             }
+            boost::shared_array<char> raw_of(new char[size]);
+            ofm = (ofp_flow_mod*) raw_of.get();
+            ofm->header.version = OFP_VERSION;
+            ofm->header.type = OFPT_FLOW_MOD;
+            ofm->header.length = htons(size);
+            ofm->match.wildcards = htonl(wildcard);
+            ofm->match.in_port = htons(flow.in_port);
+            ofm->match.dl_vlan = flow.dl_vlan;
+            ofm->match.dl_vlan_pcp = flow.dl_vlan_pcp;
+            memcpy(ofm->match.dl_src, flow.dl_src.octet, sizeof ofm->match.dl_src);
+            memcpy(ofm->match.dl_dst, flow.dl_dst.octet, sizeof ofm->match.dl_dst);
+            ofm->match.dl_type = flow.dl_type;
+            ofm->match.nw_src = flow.nw_src;
+            ofm->match.nw_dst = flow.nw_dst;
+            ofm->match.nw_proto = flow.nw_proto;
+            ofm->match.nw_tos = flow.nw_tos;
+            ofm->match.tp_src = flow.tp_src;
+            ofm->match.tp_dst = flow.tp_dst;
+            ofm->cookie = htonl(0);
+            ofm->command = htons(command);
+            ofm->buffer_id = htonl(buffer_id);
+            ofm->idle_timeout = htons(timeout);
+            ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
+            ofm->priority = htons(OFP_DEFAULT_PRIORITY);
+            ofm->flags = htons( OFPFF_SEND_FLOW_REM); // | OFPFF_CHECK_OVERLAP);
+
+            char *data = (char *)ofm->actions;
+            int pos = 0;
+            for(iter = act.begin() ; iter != act.end(); iter++) {
+                ofp_hdr = (struct ofp_action_header *)iter->get();
+                memcpy(data+pos, iter->get(), ntohs(ofp_hdr->len));
+                pos += ntohs(ofp_hdr->len);
+            }
+            send_openflow_command(datapath_id, &ofm->header, false);
             return true;
         }
 
-        ethernetaddr
-            homework_dhcp::get_mac(ipaddr ip) {
-                ethernetaddr ret;
-                if(this->ip_mapping.find(ip) != this->ip_mapping.end())
-                    return this->ip_mapping[ip]->mac;
-                return ret;
-            }
-
-
-        bool
-            homework_dhcp::is_valid_mapping(ipaddr ip, ethernetaddr mac) {
-                if(this->ip_mapping.find(ip) == this->ip_mapping.end()) {
-                    return false;
-                } else
-                    return (mac == (this->ip_mapping[ip]->mac));
-            }
-
-
-        bool
-            homework_dhcp::send_flow_modification (Flow flow, uint32_t wildcard,  datapathid datapath_id,
-                    uint32_t buffer_id, uint16_t command, uint16_t timeout,
-                    std::vector<boost::shared_array<char> > act) {
-
-                std::vector< boost::shared_array<char> >::iterator iter;
-                ofp_flow_mod* ofm;
-                size_t size = sizeof(*ofm);
-                struct ofp_action_header *ofp_hdr;
-
-                for(iter = act.begin() ; iter != act.end(); iter++) {
-                    ofp_hdr = (struct ofp_action_header *)iter->get();
-                    size += ntohs(ofp_hdr->len);
-                }
-                boost::shared_array<char> raw_of(new char[size]);
-                ofm = (ofp_flow_mod*) raw_of.get();
-                ofm->header.version = OFP_VERSION;
-                ofm->header.type = OFPT_FLOW_MOD;
-                ofm->header.length = htons(size);
-                ofm->match.wildcards = htonl(wildcard);
-                ofm->match.in_port = htons(flow.in_port);
-                ofm->match.dl_vlan = flow.dl_vlan;
-                ofm->match.dl_vlan_pcp = flow.dl_vlan_pcp;
-                memcpy(ofm->match.dl_src, flow.dl_src.octet, sizeof ofm->match.dl_src);
-                memcpy(ofm->match.dl_dst, flow.dl_dst.octet, sizeof ofm->match.dl_dst);
-                ofm->match.dl_type = flow.dl_type;
-                ofm->match.nw_src = flow.nw_src;
-                ofm->match.nw_dst = flow.nw_dst;
-                ofm->match.nw_proto = flow.nw_proto;
-                ofm->match.nw_tos = flow.nw_tos;
-                ofm->match.tp_src = flow.tp_src;
-                ofm->match.tp_dst = flow.tp_dst;
-                ofm->cookie = htonl(0);
-                ofm->command = htons(command);
-                ofm->buffer_id = htonl(buffer_id);
-                ofm->idle_timeout = htons(timeout);
-                ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
-                ofm->priority = htons(OFP_DEFAULT_PRIORITY);
-                ofm->flags = htons( OFPFF_SEND_FLOW_REM); // | OFPFF_CHECK_OVERLAP);
-
-                char *data = (char *)ofm->actions;
-                int pos = 0;
-                for(iter = act.begin() ; iter != act.end(); iter++) {
-                    ofp_hdr = (struct ofp_action_header *)iter->get();
-                    memcpy(data+pos, iter->get(), ntohs(ofp_hdr->len));
-                    pos += ntohs(ofp_hdr->len);
-                }
-                send_openflow_command(datapath_id, &ofm->header, false);
-                return true;
-            }
-
-        REGISTER_COMPONENT(Simple_component_factory<homework_dhcp>,
-                homework_dhcp);
-    } // vigil namespace
+    REGISTER_COMPONENT(Simple_component_factory<homework_dhcp>,
+            homework_dhcp);
+} // vigil namespace

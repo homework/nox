@@ -2,7 +2,10 @@
     "components": [
     {
         "name": "homework_routing" ,
-            "library": "homework_routing" 
+         "dependencies": [
+            "homework_dhcp"
+            ],
+           "library": "homework_routing" 
     },
     {
         "name": "pydhcp" ,

@@ -578,14 +578,6 @@ namespace vigil
 
     std::vector<std::string> 
         homework_routing::get_dhcp_mapping() { 
-            //std::map<struct ethernetaddr, struct dhcp_mapping *>::iterator iter = 
-            //this->mac_mapping.begin();
-            //                std::vector<std::string> v;
-            //                for (; iter != this->mac_mapping.end(); iter++) {
-            //                    if(iter->second == NULL) continue;
-            //                    v.push_back(iter->second->string()); 
-            //                }
-            //                return v;
             return this->p_dhcp->get_dhcp_mapping();
         };
 
@@ -599,11 +591,6 @@ namespace vigil
             }
             return v;
         }
-
-    //    bool 
-    //        homework_routing::check_access(const ethernetaddr& ether) {
-    //            return this->p_dhcp_proxy->is_ether_addr_routable(ether);
-    //        }
 
     void 
         homework_routing::whitelist_mac(const ethernetaddr& ether) {

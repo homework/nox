@@ -3,8 +3,6 @@
     {
         "name": "homework",
             "dependencies": [
-            "homework_dhcp",
-            "homework_routing",
            "pydhcp",
             "webservice"
                 ],
