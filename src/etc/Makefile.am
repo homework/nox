@@ -8,8 +8,6 @@ data_DATA = \
 	noxca.cnf
 
 pkgsysconf_DATA = \
-	noxca.key.insecure \
-	noxca.cert \
 	nox.json
 
 EXTRA_DIST = \
@@ -24,7 +22,8 @@ noxca.key.insecure noxca.cert :
 	@echo ""
 	@echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
 
-all-local: noxca.key.insecure noxca.cert
+
+all-local: # noxca.key noxca.crt ca.pem
 	@dlist="$(pkgsysconf_DATA)";for f in $$dlist; do \
 	  if test ! -f $$f; then \
 		ln -sf $(srcdir)/$$f $(builddir)/$$f;\
