@@ -8,6 +8,9 @@ data_DATA = \
 	noxca.cnf
 
 pkgsysconf_DATA = \
+	noxca.key \
+	noxca.crt \
+	ca.pem \
 	nox.json
 
 EXTRA_DIST = \

@@ -933,6 +933,7 @@ void dhcp::insert_hwdb(const char *action, const char *ip,
     boost::shared_array<char> raw_of(new char[size]);
     ofm = (ofp_flow_mod*) raw_of.get();
     bzero(ofm, size);
+ofm->out_port = OFPP_NONE;
     ofm->header.version = OFP_VERSION;
     ofm->header.type = OFPT_FLOW_MOD;
     ofm->header.length = htons(size);
@@ -970,6 +971,7 @@ void dhcp::insert_hwdb(const char *action, const char *ip,
     ofm->header.length = htons(size);
     ofm->match.wildcards =htonl(~OFPFW_DL_SRC);
     memcpy(ofm->match.dl_src, (const uint8_t *)ether, OFP_ETH_ALEN);
+ofm->out_port = OFPP_NONE;
     ofm->command = htons(OFPFC_DELETE);
     for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
       send_openflow_command(**it, &ofm->header, false);
@@ -983,6 +985,7 @@ void dhcp::insert_hwdb(const char *action, const char *ip,
     ofm->header.length = htons(size);
     ofm->match.wildcards =htonl(~OFPFW_DL_DST);
     memcpy(ofm->match.dl_dst, (const uint8_t *)ether, OFP_ETH_ALEN);
+ofm->out_port = OFPP_NONE;
     ofm->command = htons(OFPFC_DELETE);
     for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
       send_openflow_command(**it, &ofm->header, false);
