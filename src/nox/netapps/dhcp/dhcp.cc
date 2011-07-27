@@ -949,7 +949,7 @@ namespace vigil
 
     void 
     dhcp::revoke_mac_access(const ethernetaddr& ether) {
-        struct dhcp_mapping *state = NULL;
+//        struct dhcp_mapping *state = NULL;
         ofp_flow_mod* ofm;
         size_t size = sizeof(ofp_flow_mod);
         vector<datapathid *>::iterator it;
@@ -959,42 +959,48 @@ namespace vigil
             printf("No state found for %s\n", ether.string().c_str());
             return;
         }
-        state = this->mac_mapping[ether];
+//        state = this->mac_mapping[ether];
 
+        // remove flow matching dl_src == ether
         boost::shared_array<char> raw_of(new char[size]);
         ofm = (ofp_flow_mod*) raw_of.get();
         bzero(ofm, size);
-        //TODO: also send fm command to remove all flows. 
         ofm->header.version = OFP_VERSION;
         ofm->header.type = OFPT_FLOW_MOD;
         ofm->header.length = htons(size);
-        ofm->match.wildcards =htonl(~OFPFW_DL_SRC);
-        memcpy(ofm->match.dl_src, (const uint8_t *)ether, OFP_ETH_ALEN);
         ofm->out_port = htons(OFPP_NONE);
         ofm->command = htons(OFPFC_DELETE);
+
+        ofm->match.wildcards = htonl(~OFPFW_DL_SRC); // = match
+        memcpy(ofm->match.dl_src, (const uint8_t *)ether, OFP_ETH_ALEN);
+
         for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
             send_openflow_command(**it, &ofm->header, false);
         }
-        raw_of= boost::shared_array<char> (new char[size]);
+
+        // remove flow matching dl_dst == ether
+        raw_of = boost::shared_array<char> (new char[size]);
         ofm = (ofp_flow_mod*) raw_of.get();
         bzero(ofm, size);
-        //TODO: also send fm command to remove all flows. 
         ofm->header.version = OFP_VERSION;
         ofm->header.type = OFPT_FLOW_MOD;
         ofm->header.length = htons(size);
-        ofm->match.wildcards =htonl(~OFPFW_DL_DST);
-        memcpy(ofm->match.dl_dst, (const uint8_t *)ether, OFP_ETH_ALEN);
         ofm->out_port = htons(OFPP_NONE);
         ofm->command = htons(OFPFC_DELETE);
+
+        ofm->match.wildcards = htonl(~OFPFW_DL_DST);
+        memcpy(ofm->match.dl_dst, (const uint8_t *)ether, OFP_ETH_ALEN);
+
         for(it = this->registered_datapath.begin() ; it < this->registered_datapath.end() ; it++) {
             send_openflow_command(**it, &ofm->header, false);
         }
-        ofp_header *ofh = NULL;
+
+        // send a barrier request- ensures no reordering of subsequent
+        // flow commands with these (and preceeding flow commands)
         size = sizeof(ofp_header);
-        raw_of= boost::shared_array<char> (new char[size]);
+        raw_of = boost::shared_array<char> (new char[size]);
         ofh = (ofp_header*) raw_of.get();
         bzero(ofh, size);
-        //TODO: also send fm command to remove all flows. 
         ofh->version = OFP_VERSION;
         ofh->type = OFPT_BARRIER_REQUEST;
         ofh->length = htons(size);
