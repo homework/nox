@@ -353,6 +353,7 @@ class homework(core.Component):
 #        print "PERMIT", self.st['permitted'].keys()
             
     def permit_ether_addr(self, eaddr):
+        print "PERMIT_ETHER_ADDR", eaddr
         if not self.st:
             print "some object is not initialized yet"
             return False

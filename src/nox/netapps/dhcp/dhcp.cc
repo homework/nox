@@ -910,6 +910,7 @@ namespace vigil
 
     bool 
     dhcp::check_access(const ethernetaddr& ether) {
+        printf("check_access:%s\n", ether.string().c_str());
         return this->p_dhcp_proxy->is_ether_addr_routable(ether);
     }
 
