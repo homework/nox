@@ -227,14 +227,14 @@ namespace vigil
         flow.tp_src = htons(68);
         flow.tp_dst = htons(67);  
         this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                                      -1, OFPFC_ADD, OFP_FLOW_PERMANENT, OFP_DEFAULT_PRIORITY+1, act);
+                                      -1, OFPFC_ADD, OFP_FLOW_PERMANENT, htons(OFP_DEFAULT_PRIORITY+1), act);
 
         //force to forward igmp traffic to controller. 
         flow.dl_type = ethernet::IP;
         flow.nw_proto = ip_::proto::IGMP;
         wildcard = ~(OFPFW_DL_TYPE | OFPFW_NW_PROTO);   
         this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                                      -1, OFPFC_ADD,OFP_FLOW_PERMANENT, OFP_DEFAULT_PRIORITY+1, act);
+                                      -1, OFPFC_ADD,OFP_FLOW_PERMANENT, htons(OFP_DEFAULT_PRIORITY+1), act);
         return CONTINUE;
     }
 
@@ -277,7 +277,7 @@ namespace vigil
         ofp_act_out->max_len = htons(2000);
 
         this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                                      pi.buffer_id, OFPFC_ADD, OFP_FLOW_PERMANENT, OFP_DEFAULT_PRIORITY, act);
+                                      pi.buffer_id, OFPFC_ADD, OFP_FLOW_PERMANENT, htons(OFP_DEFAULT_PRIORITY), act);
         return STOP;
     }
 
@@ -332,7 +332,7 @@ namespace vigil
             uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_VLAN | OFPFW_DL_SRC | 
                                    OFPFW_DL_DST | OFPFW_DL_TYPE);
             this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                                          pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
+                                          pi.buffer_id, OFPFC_ADD, 30, htons(OFP_DEFAULT_PRIORITY), act);
         } else if(flow.dl_dst == this->bridge_mac) {
             boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
             act.push_back(ofp_out);
@@ -344,7 +344,7 @@ namespace vigil
             uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_VLAN | OFPFW_DL_SRC | 
                                    OFPFW_DL_DST | OFPFW_DL_TYPE);
             this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                                          pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
+                                          pi.buffer_id, OFPFC_ADD, 30, htons(OFP_DEFAULT_PRIORITY), act);
         } 
     
         if(flow.dl_dst == ethernetaddr(ethbroadcast)) {
@@ -447,7 +447,7 @@ namespace vigil
         ofp_act_out->max_len = htons(2000);
 
         this->send_flow_modification (flow, wildcard, pi.datapath_id, pi.buffer_id, 
-                                      OFPFC_ADD,OFP_FLOW_PERMANENT, OFP_DEFAULT_PRIORITY, act);
+                                      OFPFC_ADD,OFP_FLOW_PERMANENT, htons(OFP_DEFAULT_PRIORITY), act);
     
         return STOP;
     }
@@ -535,7 +535,7 @@ namespace vigil
                 ofp_act_out->port = htons(OFPP_ALL); 
                 uint32_t wildcard = 0;
                 this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                                              pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
+                                              pi.buffer_id, OFPFC_ADD, 30, htons(OFP_DEFAULT_PRIORITY), act);
                 printf("Flood multicast packets\n");
             }
             return STOP;
@@ -559,7 +559,7 @@ namespace vigil
             ofp_act_out->port = (flow.in_port == 0)?htons(OFPP_IN_PORT):0; 
             uint32_t wildcard = 0;
             this->send_flow_modification(flow, wildcard, pi.datapath_id,
-                                         pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
+                                         pi.buffer_id, OFPFC_ADD, 30, htons(OFP_DEFAULT_PRIORITY), act);
             printf("Broadcast packet detected\n");
             return STOP;
         }
@@ -621,7 +621,7 @@ namespace vigil
             ofp_act_out->port = (dst_port==flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port);
         }
         this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                                      pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
+                                      pi.buffer_id, OFPFC_ADD, 30, htons(OFP_DEFAULT_PRIORITY), act);
         return STOP;
     }
   
