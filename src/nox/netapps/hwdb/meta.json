@@ -1,0 +1,20 @@
+{
+	"components": [
+		{
+			"name": "hwdbcontroller",
+			"library": "hwdbcontroller"
+		},
+		{
+			"name": "hwdb_test",
+			"library": "hwdb_test",
+			"dependencies": [
+				"hwdbcontroller"
+			]
+		},
+
+		{
+			"name": "pytest",
+			"python": "nox.netapps.hwdb.pytest"
+		}
+	]
+}
