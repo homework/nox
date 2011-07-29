@@ -1,3 +1,6 @@
+/*
+ * An HWDB Controller
+ */
 #ifndef HWDB_CONTROL_HH__
 #define HWDB_CONTROL_HH__
 
@@ -58,15 +61,20 @@ public:
 	unsigned int query (char *q, char *r, int l);
 
 	int insert(char *q);
+	
+	/* Dummy call to test python interface */
+	void incall (char *s);
 
 private:
 	
 	RpcConnection rpc;
 	void connect (void);
 	
-	/* Periodic timer, polling hwdb */
+	/* Periodic task */
 	void timer(void);
 
+	/* Upon restart, reload persistent state in memory */
+	void restart(void);
 };
 
 struct HWDBDevice {

@@ -5,15 +5,24 @@
 			"library": "hwdbcontroller"
 		},
 		{
+			"name": "pyhwdb",
+			"dependencies": [
+				"hwdbcontroller"
+			],
+			"python": "nox.netapps.hwdb.pyhwdb"
+		},
+		{
 			"name": "hwdb_test",
 			"library": "hwdb_test",
 			"dependencies": [
 				"hwdbcontroller"
 			]
 		},
-
 		{
 			"name": "pytest",
+			"dependencies": [
+				"pyhwdb"
+			],
 			"python": "nox.netapps.hwdb.pytest"
 		}
 	]

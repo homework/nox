@@ -9,6 +9,8 @@
 
 #include "event.hh"
 
+#include "lease.hh"
+
 namespace vigil {
 
 static Vlog_module lg("hwdb_control");
@@ -44,13 +46,20 @@ void HWDBControl::configure (const Configuration*) {
 }
 
 void HWDBControl::install () {
+	
+	if (! rpc_init(0)) {
+
+		lg.err("hwdb error: rpc_init failed");
+		exit(-1);
+	}
+	
+	/* restart(); */
+	connect();
 
 	return ;
 }
 
 Disposition HWDBControl::handle_bootstrap (const Event& e) {
-
-	connect();
 	
 	timeval tv = {1, 0};
 	post(boost::bind(&HWDBControl::timer, this), tv);
@@ -78,33 +87,27 @@ void HWDBControl::getInstance(const Context* c,
 
 void HWDBControl::connect (void) {
 	
-		const char *host;
+	const char *host;
 
-		unsigned short port;
-		const char *service;
+	unsigned short port;
+	const char *service;
 
-		host = HWDB_SERVER_ADDR;
-		port = HWDB_SERVER_PORT;
+	host = HWDB_SERVER_ADDR;
+	port = HWDB_SERVER_PORT;
 
-		service = "HWDB";
+	service = "HWDB";
 		
-		rpc = NULL; /* connection */
+	rpc = NULL; /* connection */
 
-		if (! rpc_init(0)) {
+	if (! (rpc = rpc_connect(const_cast<char *>(host), port, 
+		const_cast<char *>(service), 1l))) {
+		
+		lg.err("hwdb error: rpc_connect failed at %s:%05u", 
+			host, port);
+		exit(-1);
+	}
 
-			lg.err("hwdb error: rpc_init failed");
-			exit(-1);
-		}
-
-		if (! (rpc = rpc_connect(const_cast<char *>(host), port, 
-			const_cast<char *>(service), 1l))) {
-
-			lg.err("hwdb error: rpc_connect failed at %s:%05u", 
-				host, port);
-			exit(-1);
-		}
-
-		return ;
+	return ;
 }
 
 int HWDBControl::insert(char *question) {
@@ -196,6 +199,95 @@ void HWDBControl::timer (void) {
 
 	timeval tv = {1, 0};
 	post(boost::bind(&HWDBControl::timer, this), tv);
+}
+
+void HWDBControl::restart(void) {
+	
+	const char *host;
+
+	unsigned short port;
+	const char *service;
+	
+	char question[SOCK_RECV_BUF_LEN];
+	char response[SOCK_RECV_BUF_LEN];
+	
+	unsigned int length;
+
+	Rtab *results;
+	char msg[RTAB_MSG_MAX_LENGTH];
+	
+	int i;
+
+	int done;
+
+	host = HWDB_SERVER_ADDR;
+	/* Connect to persistent storage server */
+	port = HWDB_PERSISTSERVER_PORT;
+
+	service = "PDB";
+
+	rpc = NULL;
+
+	if (! (rpc = rpc_connect(const_cast<char *>(host), port, 
+		const_cast<char *>(service), 1l))) {
+
+		lg.err("hwdb error: rpc_connect failed at %s:%05u", 
+			host, port);
+		exit(-1);
+	}
+	
+	/* Query until all results have been returned. */
+	done = 0;
+
+	while (! done) {
+		
+		if (last) {
+			
+			char *s = timestamp_to_string(last);
+			sprintf(question, "SQL:select * from LeasesLast [since %s]\n", s);
+			free(s);
+		} else {
+
+			sprintf(question, "SQL:select * from LeasesLast\n");
+		}
+		
+		length = query(question, response, sizeof(response));
+
+		results = rtab_unpack(response, length);
+		if (results && ! rtab_status(response, msg)) {
+		
+			rtab_print(results);
+		
+			for (i = 0; i < results->nrows; i++) {
+				/* map */
+				char **column = rtab_getrow(results, i);
+				/* First column is the timestamp. */
+				last = string_to_timestamp(column[0]);
+				Lease *lease = new Lease(last,
+					column[1], /* st */
+					column[2], /* mc */
+					column[3], /* ip */
+					column[4]  /* hn */
+				);
+				lg.info("Lease is %s\n", lease->string().c_str());
+				delete lease;
+			}
+			if (results->nrows == 0) done = 1; /* exit */
+		}
+		rtab_free(results);
+	}
+	/* At this point, all records have been processed */
+	last = 0LL;
+	
+	/* Disconnect from persistent storage */
+	rpc_disconnect(rpc);
+}
+
+void HWDBControl::incall (char *s) {
+
+	lg.info("Welcome %s.\n", s);
+
+	return ;
 }
 
 REGISTER_COMPONENT(container::Simple_component_factory<HWDBControl>, 
