@@ -424,7 +424,7 @@ namespace vigil
             struct ofp_action_dl_addr *ofp_act_dl_addr;
             uint32_t wildcard = 0;   
 
-            lg.info("Pkt in %s", flow.to_string().c_str());
+//            lg.info("Pkt in %s", flow.to_string().c_str());
 
             //check if src ip is routable and the src mac address is permitted.
             if(this->non_routable.matches(ipaddr(ntohl(flow.nw_src))) ) {

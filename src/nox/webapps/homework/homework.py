@@ -136,35 +136,6 @@ def datapath_join(dpid, attrs):
     """ Event handler for controller detection of live datapath (port). """
     Homework.st['ports'][dpid] = attrs['ports'][:]
 
-    # Homework.install_datapath_flow(
-    #     dpid,
-    #     { core.DL_TYPE: ethernet.ethernet.ARP_TYPE, },
-    #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-    #     Actions.flood_and_process,
-    #     )
-    # Homework.install_datapath_flow(
-    #     dpid,
-    #     { core.DL_TYPE: ethernet.ethernet.RARP_TYPE, },
-    #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-    #     Actions.flood_and_process,
-    #     )
-#    Homework.install_datapath_flow(
-#        dpid,
-#        { core.DL_TYPE: EAPOL_TYPE, },
-#        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-#        Actions.flood_and_process,
-#        )
-
-    # pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE, }
-    # for eaddr, ipaddrs in Homework.st['permitted'].items():
-    #     pattern[core.DL_SRC] = eaddr
-    #     if not ipaddrs: 
-    #         Homework.install_datapath_flow(
-    #             dpid, pattern,
-    #             openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-    #             Actions.really_flood,
-    #             )
-    
 def datapath_leave(dpid):
     """ Event handler for controller detection of datapath going down. """
     del Homework.st['ports'][dpid]
@@ -172,44 +143,19 @@ def datapath_leave(dpid):
 ##
 ## webservice entry points
 ##
-    
+
 def permit(eaddr, ipaddr=None):
     """ Permit tx/rx to/from a specified Ethernet address."""
-    
+
     print "PERMIT", eaddr, ipaddr
-    if not (eaddr or ipaddr): return 
-    
+    if not (eaddr or ipaddr): return
     eaddr = util.convert_to_eaddr(eaddr)
-    # if not ipaddr:
-    #     old_ipaddrs = Homework.st['permitted'].get(eaddr)
     Homework.st['permitted'][eaddr] = None
-
-#    for dpid in Homework.st['ports']:
-        ## permit the forward path to this eaddr/ipaddr
-        # Homework.install_datapath_flow(
-        #     dpid, pattern,
-        #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        #     Actions.really_flood,
-        #     )
-
-        ## ...and the reverse path similarly
-        # del pattern[core.DL_SRC]
-        # pattern[core.DL_DST] = eaddr
-        # if ipaddr:
-        #     del pattern[core.NW_SRC]
-        #     pattern[core.NW_DST] = ipaddr
-        
-        # Homework.install_datapath_flow(
-        #     dpid, pattern,
-        #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        #     Actions.really_flood,
-        #     )
-
     return status()
 
 def ws_permit(request, args):
     """ WS interface to permit(). """
-    
+
     eaddr = args.get('eaddr')
     if not eaddr: return webservice.badRequest(request, "missing eaddr")
 
@@ -234,18 +180,14 @@ def ws_permit_group(request, args):
     for eaddr in content:
         permit(eaddr)
     return status()
-
-#    eaddr = args.get('eaddr')
-#    if not eaddr: return webservice.badRequest(request, "missing eaddr")
-
     return '{"status" : "success"}' #permit(eaddr)
 
 def deny(eaddr, ipaddr = None):
     """ Deny tx/rx to/from a specified Ethernet address. """
-                                                            
+
     print "DENY", eaddr, ipaddr
-    if not (eaddr or ipaddr): return 
-    
+    if not (eaddr or ipaddr): return
+ 
     eaddr = util.convert_to_eaddr(eaddr)
     if eaddr in Homework.st['permitted']:
         del Homework.st['permitted'][eaddr]
