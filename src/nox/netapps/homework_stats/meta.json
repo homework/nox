@@ -1,0 +1,12 @@
+{
+    "components": [
+    {
+        "python": "nox.netapps.homework_stats.homework_stats",
+            "dependencies": [
+                "python",
+            "python_flow_fetcher"
+                ],
+            "name": "homework_stats"
+    }
+    ]
+}
