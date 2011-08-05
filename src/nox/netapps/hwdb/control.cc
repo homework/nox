@@ -18,6 +18,7 @@ static Vlog_module lg("hwdb_control");
 static tstamp_t last = 0LL;
 
 HWDBDevice::HWDBDevice(const char *m, const char *a) {
+
 	strncpy(mac, m, sizeof(mac));
 	strncpy(action, a, sizeof(action));
 }
@@ -53,17 +54,30 @@ void HWDBControl::install () {
 		exit(-1);
 	}
 	
-	/* restart(); */
+	/* Query persistent hwdb server.
+	 * restart(); */
+
 	connect();
+	
+	/* Offer an RPC service and receive callbacks upon
+	 * change in the Devices table.
+	 *
+	 * Spawns a new cooperative thread.
+	 */
+	offer();
 
 	return ;
 }
 
 Disposition HWDBControl::handle_bootstrap (const Event& e) {
 	
-	timeval tv = {1, 0};
-	post(boost::bind(&HWDBControl::timer, this), tv);
-
+	/*
+	 * By default, we receive callbacks from HWDB, so there is
+	 * no need to periodically query hwdb. However, as an exa-
+	 * mple, consider the following:
+	 * 
+	 * timeval tv = {1, 0};
+	 * post(boost::bind(&HWDBControl::timer, this), tv); */
 
 	return CONTINUE;
 }
@@ -283,8 +297,139 @@ void HWDBControl::restart(void) {
 	rpc_disconnect(rpc);
 }
 
+void HWDBControl::offer(void) {
+	
+	const char *myservice = "mynox";
+	
+	char myhost[128];
+	unsigned short myport;
+	
+	char q[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
+
+	unsigned int length;
+
+	rps = NULL;
+
+	rps = rpc_offer(const_cast<char *>(myservice));
+
+	if (! rps) {
+
+		fprintf(stderr, "Failure offering %s service\n", myservice);
+		exit(-1);
+	}
+	rpc_details(myhost, &myport);
+	
+	sprintf(q, "SQL:subscribe DevicesLast %s %hu %s", 
+		myhost, myport, myservice);
+		
+	lg.info("Q: %s\n", q);
+		
+	if (! rpc_call(rpc, q, strlen(q) + 1, r, sizeof(r), &length)) {
+			
+		lg.err("hwdb error: rpc_call failed (%s)\n", q);
+		exit(-1);
+	}
+	
+	r[length] = '\0';
+	lg.info("Response to subscribe command: %s", r);
+
+	/* Start a cooperative thread. */	
+	mythread.start(boost::bind(&HWDBControl::run, this));
+
+	return ;
+}
+
+/* The call to 'next()' blocks inside a co-thread. */
+void HWDBControl::run () {
+	
+	char m[256];
+	char a[256];
+	
+	int error;
+	
+	list<HWDBDevice> mylist = list<HWDBDevice>();
+	
+	for (;;) {
+		
+		memset(m, 0, sizeof(m));
+		memset(a, 0, sizeof(a));
+		
+		mylist.clear();
+		
+		/* Get next event associated with a device. */
+		error = next(m, a, 256);
+		if (error) {
+			lg.err("Failed to receive HWDB event.\n");
+			continue;
+		}
+		lg.info("Dispatch next event.");
+		mylist.push_back(*(new HWDBDevice(m, a)));
+		post(new HWDBEvent(mylist)); /* HWDBEvent creates a deep copy */
+	}
+	return ;
+}
+
+/*
+ * NOX magic happens here. */
+int HWDBControl::next (char *mc, char *st, int size) {
+
+	char e[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
+
+	unsigned l; /* received buffer size */
+
+	char msg[RTAB_MSG_MAX_LENGTH];
+
+	RpcConnection sender;
+	Rtab *results;
+
+	lg.info("HWDB blocking call.\n");
+	
+	/*
+	 * Call 'rpc_query' from a native thread, which avoids blocking
+	 * other cooperative threads in the thread group.
+	 *
+	 * This technique has been used in the 'co_async_*' methods, in
+	 * threads/impl, for system calls that may block (e.g. a read).
+	 *
+	 * Co_native section causes the current co-thread (mythread) to
+	 * migrate to a native thread, and migrate back to its original
+	 * thread group upon completion (in the destructor).
+	 *
+	 * Cf. cooperative.hh, class Co_native_section. */
+	Co_native_section as_native;
+	l = rpc_query(rps, &sender, e, SOCK_RECV_BUF_LEN);
+	
+	if (l <= 0) {
+		lg.err("hwdb error: rpc_query failed.\n");
+		return 1;
+	}
+	
+	/* Reply to sender. */
+	sprintf(r, "OK");
+	rpc_response(rps, sender, r, strlen(r) + 1);
+	
+	/* Parse event. */
+	e[l] = '\0';
+	results = rtab_unpack(e, l);
+	if (results && ! rtab_status(e, msg)) {
+		rtab_print(results);
+		/* */
+		lg.info("Event received.\n");
+		char **column = rtab_getrow(results, 0);
+		
+		strncpy(mc, column[1], size);
+		strncpy(st, column[2], size); /* Connection status */
+		lg.info("[%s, %s]\n", mc, st);
+	}
+	rtab_free(results);
+
+	return 0;
+}
+
+
 void HWDBControl::incall (char *s) {
 
+	/* Used for testing the swig'd proxy from python. */
 	lg.info("Welcome %s.\n", s);
 
 	return ;

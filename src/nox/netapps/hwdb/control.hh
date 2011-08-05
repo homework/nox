@@ -29,6 +29,8 @@ extern "C" {
 }
 
 #include "threads/cooperative.hh"
+#include "threads/native.hh"
+#include "threads/impl.hh"
 
 namespace vigil {
 
@@ -75,6 +77,15 @@ private:
 
 	/* Upon restart, reload persistent state in memory */
 	void restart(void);
+	
+	/* */
+	RpcService rps;
+	Co_thread mythread;
+
+	void offer(void);
+	void run(void);
+	
+	int next(char *, char *, int);
 };
 
 struct HWDBDevice {
