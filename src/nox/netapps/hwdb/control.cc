@@ -11,6 +11,8 @@
 
 #include "lease.hh"
 
+#define DEVICE_QUERY_DELAY 1
+
 namespace vigil {
 
     static Vlog_module lg("hwdb_control");
@@ -76,7 +78,7 @@ namespace vigil {
          * no need to periodically query hwdb. However, as an exa-
          * mple, consider the following:
          */ 
-     timeval tv = {1, 0};
+     timeval tv = {DEVICE_QUERY_DELAY, 0};
      post(boost::bind(&HWDBControl::timer, this), tv);
 
     return CONTINUE;
@@ -212,7 +214,7 @@ void HWDBControl::timer (void) {
     if(mylist.size() > 0)
         post(new HWDBEvent(mylist));
 
-    timeval tv = {1, 0};
+    timeval tv = {DEVICE_QUERY_DELAY, 0};
     post(boost::bind(&HWDBControl::timer, this), tv);
 }
 
@@ -299,12 +301,12 @@ void HWDBControl::restart(void) {
     rpc_disconnect(rpc);
 }
 
-    map<ethernetaddr, ipaddr> HWDBControl::get_dhcp_persist() {
+    map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
         const char *host;
         unsigned short port;
         const char *service;
-
-        map<ethernetaddr, ipaddr> ret;
+        RpcConnection persist_rpc;
+        map<ethernetaddr, Lease> ret;
 
         char question[SOCK_RECV_BUF_LEN];
         char response[SOCK_RECV_BUF_LEN];
@@ -318,9 +320,8 @@ void HWDBControl::restart(void) {
         /* Connect to persistent storage server */
         port = HWDB_PERSISTSERVER_PORT;
         service = "PDB";
-        rpc = NULL;
 
-        if (! (rpc = rpc_connect(const_cast<char *>(host), port, 
+        if (! (persist_rpc = rpc_connect(const_cast<char *>(host), port, 
                         const_cast<char *>(service), 1l))) {
             lg.err("hwdb error: rpc_connect failed at %s:%05u", 
                     host, port);
@@ -329,6 +330,7 @@ void HWDBControl::restart(void) {
 
         /* Query until all results have been returned. */
         while (! done) {
+            done = 1;
             if (last) {
                 char *s = timestamp_to_string(last);
                 sprintf(question, "SQL:select * from LeasesLast [since %s]\n", s);
@@ -336,8 +338,15 @@ void HWDBControl::restart(void) {
             } else {
                 sprintf(question, "SQL:select * from LeasesLast\n");
             }
+            lg.info("[%d] %s", strlen(question), question);
 
-            length = query(question, response, sizeof(response));
+            if (! rpc_call(rpc, question, strlen(question) + 1, 
+                        response, SOCK_RECV_BUF_LEN, &length)) {
+                lg.err("hwdb error: rpc_call() failed\n");
+                return ret;
+            }
+
+            //length = query(question, response, sizeof(response));
             results = rtab_unpack(response, length);
             if (results && ! rtab_status(response, msg)) {
                 rtab_print(results);
@@ -346,166 +355,182 @@ void HWDBControl::restart(void) {
                     char **column = rtab_getrow(results, i);
                     /* First column is the timestamp. */
                     last = string_to_timestamp(column[0]);
-                    ret[ethernetaddr(string(column[2]))] = ipaddr(string(column[3]));
-                    lg.info("Lease is %s -> \n", column[2], column[3]);
+                    //ret[ethernetaddr(string(column[2]))] = ipaddr(string(column[3]));
+                    lg.info("Lease is %s -> %s\n", column[2], column[3]);
+                    ret[ethernetaddr(string(column[2]))] = Lease(last,
+                            column[1], /* st */
+                            column[2], /* mc */
+                            column[3], /* ip */
+                            column[4]  /* hn */
+                            );
+
                 }
                 done = (results->nrows == 0); /* exit */
+
             }
+            lg.err("returned rec %d, done %d\n", results->nrows, done);
             rtab_free(results);
         }
         /* At this point, all records have been processed */
         last = 0LL;
 
+        //timeval now;
+        //gettimeofday(&now, NULL);
+        //ret[ethernetaddr("00:1f:3b:26:9d:4b")] = Lease(ipaddr("10.2.0.1"), ethernetaddr("00:1f:3b:26:9d:4b"), 
+        //        "", 100000L, DHCP_STATE_ADD);
+        //ret[ethernetaddr("00:23:cd:c7:93:b5")] = Lease(ipaddr("10.2.0.5"), ethernetaddr("00:23:cd:c7:93:b5"), 
+        //        "", now.tv_sec, DHCP_STATE_ADD);
+
         /* Disconnect from persistent storage */
-        rpc_disconnect(rpc);
+        rpc_disconnect(persist_rpc);
 
         return ret;
- 
+
     }
 
-    void HWDBControl::offer(void) {
+void HWDBControl::offer(void) {
 
-        const char *myservice = "mynox";
+    const char *myservice = "mynox";
 
-        char myhost[128];
-        unsigned short myport;
+    char myhost[128];
+    unsigned short myport;
 
-        char q[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
+    char q[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
 
-        unsigned int length;
+    unsigned int length;
 
-        rps = NULL;
+    rps = NULL;
 
-        rps = rpc_offer(const_cast<char *>(myservice));
+    rps = rpc_offer(const_cast<char *>(myservice));
 
-        if (! rps) {
+    if (! rps) {
 
-            fprintf(stderr, "Failure offering %s service\n", myservice);
-            exit(-1);
-        }
-        rpc_details(myhost, &myport);
+        fprintf(stderr, "Failure offering %s service\n", myservice);
+        exit(-1);
+    }
+    rpc_details(myhost, &myport);
 
-        sprintf(q, "SQL:subscribe DevicesLast %s %hu %s", 
-                myhost, myport, myservice);
+    sprintf(q, "SQL:subscribe DevicesLast %s %hu %s", 
+            myhost, myport, myservice);
 
-        lg.info("Q: %s\n", q);
+    lg.info("Q: %s\n", q);
 
-        if (! rpc_call(rpc, q, strlen(q) + 1, r, sizeof(r), &length)) {
+    if (! rpc_call(rpc, q, strlen(q) + 1, r, sizeof(r), &length)) {
 
-            lg.err("hwdb error: rpc_call failed (%s)\n", q);
-            exit(-1);
-        }
-
-        r[length] = '\0';
-//        lg.info("Response to subscribe command: %s", r);
-
-        /* Start a cooperative thread. */	
-        mythread.start(boost::bind(&HWDBControl::run, this));
-
-        return ;
+        lg.err("hwdb error: rpc_call failed (%s)\n", q);
+        exit(-1);
     }
 
-    /* The call to 'next()' blocks inside a co-thread. */
-    void HWDBControl::run () {
+    r[length] = '\0';
+    //        lg.info("Response to subscribe command: %s", r);
 
-        char m[256];
-        char a[256];
+    /* Start a cooperative thread. */	
+    mythread.start(boost::bind(&HWDBControl::run, this));
 
-        int error;
+    return ;
+}
 
-        list<HWDBDevice> mylist = list<HWDBDevice>();
+/* The call to 'next()' blocks inside a co-thread. */
+void HWDBControl::run () {
 
-        for (;;) {
+    char m[256];
+    char a[256];
 
-            memset(m, 0, sizeof(m));
-            memset(a, 0, sizeof(a));
+    int error;
 
-            mylist.clear();
+    list<HWDBDevice> mylist = list<HWDBDevice>();
 
-            /* Get next event associated with a device. */
-            error = next(m, a, 256);
-            if (error) {
-                lg.err("Failed to receive HWDB event.\n");
-                continue;
-            }
-            lg.info("Dispatch next event.");
-            mylist.push_back(*(new HWDBDevice(m, a)));
-            lg.err("New event working");
-            post(new HWDBEvent(mylist)); /* HWDBEvent creates a deep copy */
+    for (;;) {
+
+        memset(m, 0, sizeof(m));
+        memset(a, 0, sizeof(a));
+
+        mylist.clear();
+
+        /* Get next event associated with a device. */
+        error = next(m, a, 256);
+        if (error) {
+            lg.err("Failed to receive HWDB event.\n");
+            continue;
         }
-        return ;
+        lg.info("Dispatch next event.");
+        mylist.push_back(*(new HWDBDevice(m, a)));
+        lg.err("New event working");
+        post(new HWDBEvent(mylist)); /* HWDBEvent creates a deep copy */
     }
+    return ;
+}
+
+/*
+ * NOX magic happens here. */
+int HWDBControl::next (char *mc, char *st, int size) {
+
+    char e[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
+
+    unsigned l; /* received buffer size */
+
+    char msg[RTAB_MSG_MAX_LENGTH];
+
+    RpcConnection sender;
+    Rtab *results;
+
 
     /*
-     * NOX magic happens here. */
-    int HWDBControl::next (char *mc, char *st, int size) {
+     * Call 'rpc_query' from a native thread, which avoids blocking
+     * other cooperative threads in the thread group.
+     *
+     * This technique has been used in the 'co_async_*' methods, in
+     * threads/impl, for system calls that may block (e.g. a read).
+     *
+     * Co_native section causes the current co-thread (mythread) to
+     * migrate to a native thread, and migrate back to its original
+     * thread group upon completion (in the destructor).
+     *
+     * Cf. cooperative.hh, class Co_native_section. */
+    Co_native_section as_native;
+    lg.info("HWDB blocking call.\n");
 
-        char e[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
+    l = rpc_query(rps, &sender, e, SOCK_RECV_BUF_LEN);
 
-        unsigned l; /* received buffer size */
-
-        char msg[RTAB_MSG_MAX_LENGTH];
-
-        RpcConnection sender;
-        Rtab *results;
-
-
-        /*
-         * Call 'rpc_query' from a native thread, which avoids blocking
-         * other cooperative threads in the thread group.
-         *
-         * This technique has been used in the 'co_async_*' methods, in
-         * threads/impl, for system calls that may block (e.g. a read).
-         *
-         * Co_native section causes the current co-thread (mythread) to
-         * migrate to a native thread, and migrate back to its original
-         * thread group upon completion (in the destructor).
-         *
-         * Cf. cooperative.hh, class Co_native_section. */
-        Co_native_section as_native;
-        lg.info("HWDB blocking call.\n");
-
-        l = rpc_query(rps, &sender, e, SOCK_RECV_BUF_LEN);
-
-        lg.info("HWDB after locking call.\n");
-        if (l <= 0) {
-            lg.err("hwdb error: rpc_query failed.\n");
-            return 1;
-        }
-
-        /* Reply to sender. */
-        sprintf(r, "OK");
-        rpc_response(rps, sender, r, strlen(r) + 1);
-
-        /* Parse event. */
-        e[l] = '\0';
-        results = rtab_unpack(e, l);
-        if (results && ! rtab_status(e, msg)) {
-            rtab_print(results);
-            /* */
-            lg.info("Event received.\n");
-            char **column = rtab_getrow(results, 0);
-
-            strncpy(mc, column[1], size);
-            strncpy(st, column[2], size); /* Connection status */
-            lg.info("[%s, %s]\n", mc, st);
-        }
-        rtab_free(results);
-
-        return 0;
+    lg.info("HWDB after locking call.\n");
+    if (l <= 0) {
+        lg.err("hwdb error: rpc_query failed.\n");
+        return 1;
     }
 
+    /* Reply to sender. */
+    sprintf(r, "OK");
+    rpc_response(rps, sender, r, strlen(r) + 1);
 
-    void HWDBControl::incall (char *s) {
+    /* Parse event. */
+    e[l] = '\0';
+    results = rtab_unpack(e, l);
+    if (results && ! rtab_status(e, msg)) {
+        rtab_print(results);
+        /* */
+        lg.info("Event received.\n");
+        char **column = rtab_getrow(results, 0);
 
-        /* Used for testing the swig'd proxy from python. */
-        lg.info("Welcome %s.\n", s);
-
-        return ;
+        strncpy(mc, column[1], size);
+        strncpy(st, column[2], size); /* Connection status */
+        lg.info("[%s, %s]\n", mc, st);
     }
+    rtab_free(results);
 
-    REGISTER_COMPONENT(container::Simple_component_factory<HWDBControl>, 
-            HWDBControl);
+    return 0;
+}
+
+
+void HWDBControl::incall (char *s) {
+
+    /* Used for testing the swig'd proxy from python. */
+    lg.info("Welcome %s.\n", s);
+
+    return ;
+}
+
+REGISTER_COMPONENT(container::Simple_component_factory<HWDBControl>, 
+        HWDBControl);
 
 } /* namespace vigil */
 

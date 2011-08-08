@@ -19,6 +19,8 @@
 #include "netinet++/ipaddr.hh"
 #include "dhcp_mapping.hh"
 
+#include "hwdb/lease.hh"
+
 const char *dhcp_msg_type_name[] = {NULL, "DHCPDiscover", "DHCPOffer", 
                     "DHCPRequest", "DHCPDecline", "DHCPAck", 
                     "DHCPNak", "DHCPRelease", "DHCPInform"};
@@ -51,6 +53,9 @@ namespace vigil
         int s;
         struct ifreq ifr;
         struct nl_cache *cache;
+        int i = 1;
+        timeval now;
+        dhcp_mapping *state = NULL;
 
         //initialiaze and connect the socket to the netlink socket
         if((this->sk = nl_socket_alloc()) == NULL) {
@@ -105,6 +110,26 @@ namespace vigil
         lg.info("br0 mac addr : %s", this->bridge_mac.string().c_str());
         close(s);
 
+        //loading existing mappings from hwdb
+        map<ethernetaddr, Lease> mappings = this->hwdb->get_dhcp_persist();
+        map<ethernetaddr, Lease>::iterator iter = mappings.begin();
+
+        lg.err("Loading mappings:\n");
+        gettimeofday(&now, NULL);
+        for(; iter != mappings.end(); iter++) {
+            if( (iter->second.st == DHCP_STATE_ADD) && (iter->second.ts +  MAX_ROUTABLE_LEASE > now.tv_sec)) {
+                state = new dhcp_mapping(iter->second.ip, iter->second.mc, iter->second.ts +  MAX_ROUTABLE_LEASE, DHCP_STATE_FINAL);
+                printf("State is current. adding ip %s to br0\n", ipaddr(ntohl((uint32_t)iter->second.ip) + 1).string().c_str());
+                homework_dhcp::add_addr(ntohl(((uint32_t)iter->second.ip)) + 1);
+            } else 
+                state = new dhcp_mapping(iter->second.ip, iter->second.mc, 0, DHCP_STATE_FINAL);
+            printf("inserting new entry for %s - %s\n",  iter->second.mc.string().c_str(), 
+                     iter->second.ip.string().c_str());
+            this->mac_mapping[iter->second.mc] = state;
+            this->ip_mapping[ iter->second.ip] = state;
+        }
+
+        //TODO: cleanup allocated ip addresses to br0
         lg.dbg(" Install called ");
     }
 

@@ -11,11 +11,6 @@
 #include "vlog.hh"
 #endif
 
-#include <map>
-
-#include <netinet++/ethernetaddr.hh>
-#include <netinet++/ipaddr.hh>
-
 #include "component.hh"
 #include "config.h"
 
@@ -35,11 +30,15 @@ extern "C" {
 #include "threads/cooperative.hh"
 #include "threads/native.hh"
 #include "threads/impl.hh"
+#include <map>
+
 
 namespace vigil {
 
     using namespace std;
     using namespace vigil::container;
+
+    struct Lease;
 
     struct HWDBEvent;
 
@@ -70,7 +69,7 @@ namespace vigil {
 
             /* Dummy call to test python interface */
             void incall (char *s);
-            map<ethernetaddr, ipaddr> get_dhcp_persist();
+            map<ethernetaddr, Lease> get_dhcp_persist();
         private:
 
             RpcConnection rpc;
