@@ -4,7 +4,7 @@
 
 #include <errno.h>
 #include <string>
-
+#include <map>
 #include "bootstrap-complete.hh"
 
 #include "event.hh"
@@ -76,114 +76,195 @@ namespace vigil {
          * no need to periodically query hwdb. However, as an exa-
          * mple, consider the following:
          */ 
-         timeval tv = {1, 0};
-         post(boost::bind(&HWDBControl::timer, this), tv);
+     timeval tv = {1, 0};
+     post(boost::bind(&HWDBControl::timer, this), tv);
 
-        return CONTINUE;
+    return CONTINUE;
+}
+
+Disposition HWDBControl::hwdb_handler(const Event& e) {
+
+    lg.info("Event received.\n");
+
+    return CONTINUE;
+}
+
+void HWDBControl::getInstance(const Context* c, 
+        HWDBControl*& component) {
+
+    component = dynamic_cast<HWDBControl*>
+        (c->get_by_interface(container::Interface_description
+                             (typeid(HWDBControl).name())));
+
+    return ;
+}
+
+void HWDBControl::connect (void) {
+
+    const char *host;
+
+    unsigned short port;
+    const char *service;
+
+    host = HWDB_SERVER_ADDR;
+    port = HWDB_SERVER_PORT;
+
+    service = "HWDB";
+
+    rpc = NULL; /* connection */
+
+    if (! (rpc = rpc_connect(const_cast<char *>(host), port, 
+                    const_cast<char *>(service), 1l))) {
+
+        lg.err("hwdb error: rpc_connect failed at %s:%05u", 
+                host, port);
+        exit(-1);
     }
 
-    Disposition HWDBControl::hwdb_handler(const Event& e) {
+    return ;
+}
 
-        lg.info("Event received.\n");
+int HWDBControl::insert(char *question) {
 
-        return CONTINUE;
+    char response[SOCK_RECV_BUF_LEN];
+    unsigned int length;
+
+    int e;
+    char msg[RTAB_MSG_MAX_LENGTH];
+
+    length = query(question, response, sizeof(response));
+
+    e = rtab_status(response, msg);
+    lg.info("%s\n", msg);
+    fprintf(stderr, "insert: %s %s \n", question, response);
+    return e;
+}
+
+unsigned int HWDBControl::query (char *q, char *r, int l) {
+
+    char response[SOCK_RECV_BUF_LEN];
+    unsigned int length;
+
+    lg.info("[%d] %s", strlen(q), q);
+
+    if (! rpc_call(rpc, q, strlen(q) + 1, 
+                response, SOCK_RECV_BUF_LEN, &length)) {
+
+        lg.err("hwdb error: rpc_call() failed\n");
+        return 0;
     }
+    response[length] = '\0';
+    memcpy(r, response, length);
+    return length;
+}
 
-    void HWDBControl::getInstance(const Context* c, 
-            HWDBControl*& component) {
+void HWDBControl::timer (void) {
 
-        component = dynamic_cast<HWDBControl*>
-            (c->get_by_interface(container::Interface_description
-                                 (typeid(HWDBControl).name())));
+    char question[SOCK_RECV_BUF_LEN];
+    char response[SOCK_RECV_BUF_LEN];
 
-        return ;
-    }
+    unsigned int length;
 
-    void HWDBControl::connect (void) {
+    Rtab *results;
+    char msg[RTAB_MSG_MAX_LENGTH];
 
-        const char *host;
-
-        unsigned short port;
-        const char *service;
-
-        host = HWDB_SERVER_ADDR;
-        port = HWDB_SERVER_PORT;
-
-        service = "HWDB";
-
-        rpc = NULL; /* connection */
-
-        if (! (rpc = rpc_connect(const_cast<char *>(host), port, 
-                        const_cast<char *>(service), 1l))) {
-
-            lg.err("hwdb error: rpc_connect failed at %s:%05u", 
-                    host, port);
-            exit(-1);
-        }
-
-        return ;
-    }
-
-    int HWDBControl::insert(char *question) {
-
-        char response[SOCK_RECV_BUF_LEN];
-        unsigned int length;
-
-        int e;
-        char msg[RTAB_MSG_MAX_LENGTH];
-
-        length = query(question, response, sizeof(response));
-
-        e = rtab_status(response, msg);
-        lg.info("%s\n", msg);
-        fprintf(stderr, "insert: %s %s \n", question, response);
-        return e;
-    }
-
-    unsigned int HWDBControl::query (char *q, char *r, int l) {
-
-        char response[SOCK_RECV_BUF_LEN];
-        unsigned int length;
-
-        lg.info("[%d] %s", strlen(q), q);
-
-        if (! rpc_call(rpc, q, strlen(q) + 1, 
-                    response, SOCK_RECV_BUF_LEN, &length)) {
-
-            lg.err("hwdb error: rpc_call() failed\n");
-            return 0;
-        }
-        response[length] = '\0';
-        memcpy(r, response, length);
-        return length;
-    }
-
-    void HWDBControl::timer (void) {
-
-        char question[SOCK_RECV_BUF_LEN];
-        char response[SOCK_RECV_BUF_LEN];
-
-        unsigned int length;
-
-        Rtab *results;
-        char msg[RTAB_MSG_MAX_LENGTH];
-
-        /* Convert results into a list. */
-        int i = 0;
-        list<HWDBDevice> mylist = list<HWDBDevice>();
-        char m[256];
-        char a[256];
+    /* Convert results into a list. */
+    int i = 0;
+    list<HWDBDevice> mylist = list<HWDBDevice>();
+    char m[256];
+    char a[256];
 
 //        lg.info("Timer fired.\n");
+
+    if (last) {
+
+        char *s = timestamp_to_string(last);
+        sprintf(question, "SQL:select * from Devices [since %s]\n", s);
+        free(s);
+    } else {
+
+        sprintf(question, "SQL:select * from Devices\n");
+    }
+
+    length = query(question, response, sizeof(response));
+
+    results = rtab_unpack(response, length);
+    if (results && ! rtab_status(response, msg)) {
+
+        rtab_print(results);
+
+        for (i = 0; i < results->nrows; i++) {
+
+            char **column = rtab_getrow(results, i);
+
+            memset(m, 0, sizeof(m));
+            memset(a, 0, sizeof(a));
+            /* First column is the timestamp. */
+            last = string_to_timestamp(column[0]);
+
+            strncpy(m, column[1], sizeof(m));
+            strncpy(a, column[2], sizeof(a));
+            /* lg.info("[%s, %s]\n", m, a); */
+            mylist.push_back(*(new HWDBDevice(m, a)));
+        }
+    }
+    rtab_free(results);
+    if(mylist.size() > 0)
+        post(new HWDBEvent(mylist));
+
+    timeval tv = {1, 0};
+    post(boost::bind(&HWDBControl::timer, this), tv);
+}
+
+void HWDBControl::restart(void) {
+
+    const char *host;
+
+    unsigned short port;
+    const char *service;
+
+    char question[SOCK_RECV_BUF_LEN];
+    char response[SOCK_RECV_BUF_LEN];
+
+    unsigned int length;
+
+    Rtab *results;
+    char msg[RTAB_MSG_MAX_LENGTH];
+
+    int i;
+
+    int done;
+
+    host = HWDB_SERVER_ADDR;
+    /* Connect to persistent storage server */
+//        port = HWDB_PERSISTSERVER_PORT;
+    port = HWDB_PERSISTSERVER_PORT;
+
+    service = "PDB";
+
+    rpc = NULL;
+
+    if (! (rpc = rpc_connect(const_cast<char *>(host), port, 
+                    const_cast<char *>(service), 1l))) {
+
+        lg.err("hwdb error: rpc_connect failed at %s:%05u", 
+                host, port);
+        exit(-1);
+    }
+
+    /* Query until all results have been returned. */
+    done = 0;
+
+    while (! done) {
 
         if (last) {
 
             char *s = timestamp_to_string(last);
-            sprintf(question, "SQL:select * from Devices [since %s]\n", s);
+            sprintf(question, "SQL:select * from LeasesLast [since %s]\n", s);
             free(s);
         } else {
 
-            sprintf(question, "SQL:select * from Devices\n");
+            sprintf(question, "SQL:select * from LeasesLast\n");
         }
 
         length = query(question, response, sizeof(response));
@@ -194,110 +275,29 @@ namespace vigil {
             rtab_print(results);
 
             for (i = 0; i < results->nrows; i++) {
-
+                /* map */
                 char **column = rtab_getrow(results, i);
-
-                memset(m, 0, sizeof(m));
-                memset(a, 0, sizeof(a));
                 /* First column is the timestamp. */
                 last = string_to_timestamp(column[0]);
-
-                strncpy(m, column[1], sizeof(m));
-                strncpy(a, column[2], sizeof(a));
-                /* lg.info("[%s, %s]\n", m, a); */
-                mylist.push_back(*(new HWDBDevice(m, a)));
+                Lease *lease = new Lease(last,
+                        column[1], /* st */
+                        column[2], /* mc */
+                        column[3], /* ip */
+                        column[4]  /* hn */
+                        );
+                lg.info("Lease is %s\n", lease->string().c_str());
+                delete lease;
             }
+            if (results->nrows == 0) done = 1; /* exit */
         }
         rtab_free(results);
-        if(mylist.size() > 0)
-            post(new HWDBEvent(mylist));
-
-        timeval tv = {1, 0};
-        post(boost::bind(&HWDBControl::timer, this), tv);
     }
+    /* At this point, all records have been processed */
+    last = 0LL;
 
-    void HWDBControl::restart(void) {
-
-        const char *host;
-
-        unsigned short port;
-        const char *service;
-
-        char question[SOCK_RECV_BUF_LEN];
-        char response[SOCK_RECV_BUF_LEN];
-
-        unsigned int length;
-
-        Rtab *results;
-        char msg[RTAB_MSG_MAX_LENGTH];
-
-        int i;
-
-        int done;
-
-        host = HWDB_SERVER_ADDR;
-        /* Connect to persistent storage server */
-//        port = HWDB_PERSISTSERVER_PORT;
-        port = HWDB_PERSISTSERVER_PORT;
-
-        service = "PDB";
-
-        rpc = NULL;
-
-        if (! (rpc = rpc_connect(const_cast<char *>(host), port, 
-                        const_cast<char *>(service), 1l))) {
-
-            lg.err("hwdb error: rpc_connect failed at %s:%05u", 
-                    host, port);
-            exit(-1);
-        }
-
-        /* Query until all results have been returned. */
-        done = 0;
-
-        while (! done) {
-
-            if (last) {
-
-                char *s = timestamp_to_string(last);
-                sprintf(question, "SQL:select * from LeasesLast [since %s]\n", s);
-                free(s);
-            } else {
-
-                sprintf(question, "SQL:select * from LeasesLast\n");
-            }
-
-            length = query(question, response, sizeof(response));
-
-            results = rtab_unpack(response, length);
-            if (results && ! rtab_status(response, msg)) {
-
-                rtab_print(results);
-
-                for (i = 0; i < results->nrows; i++) {
-                    /* map */
-                    char **column = rtab_getrow(results, i);
-                    /* First column is the timestamp. */
-                    last = string_to_timestamp(column[0]);
-                    Lease *lease = new Lease(last,
-                            column[1], /* st */
-                            column[2], /* mc */
-                            column[3], /* ip */
-                            column[4]  /* hn */
-                            );
-                    lg.info("Lease is %s\n", lease->string().c_str());
-                    delete lease;
-                }
-                if (results->nrows == 0) done = 1; /* exit */
-            }
-            rtab_free(results);
-        }
-        /* At this point, all records have been processed */
-        last = 0LL;
-
-        /* Disconnect from persistent storage */
-        rpc_disconnect(rpc);
-    }
+    /* Disconnect from persistent storage */
+    rpc_disconnect(rpc);
+}
 
     map<ethernetaddr, ipaddr> HWDBControl::get_dhcp_persist() {
         const char *host;

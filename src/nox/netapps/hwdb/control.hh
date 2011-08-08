@@ -6,7 +6,6 @@
 
 #ifdef LOG4CXX_ENABLED
 #include <boost/format.hpp>
-
 #include "log4cxx/logger.h"
 #else
 #include "vlog.hh"
@@ -14,8 +13,10 @@
 
 #include <map>
 
-#include "component.hh"
+#include <netinet++/ethernetaddr.hh>
+#include <netinet++/ipaddr.hh>
 
+#include "component.hh"
 #include "config.h"
 
 #include "json_object.hh"
@@ -34,8 +35,6 @@ extern "C" {
 #include "threads/cooperative.hh"
 #include "threads/native.hh"
 #include "threads/impl.hh"
-#include "netinet++/ipaddr.hh"
-#include "netinet++/ethernetaddr.hh"
 
 namespace vigil {
 

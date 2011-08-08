@@ -117,9 +117,8 @@ def permit(eaddr, ipaddr=None):
     if not (eaddr or ipaddr): return
     
     eaddr = util.convert_to_eaddr(eaddr)
-    Homework.st['permitted'][eaddr] = None
+    Homework.st['permitted'][eaddr] = True
     Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"permit\")"%(eaddr))
-    #self._hwdb.insert("")
     return status()
 
 def ws_permit(request, args):
@@ -153,8 +152,7 @@ def deny(eaddr, ipaddr = None):
     print "DENY", eaddr, ipaddr
     if not (eaddr or ipaddr): return
     eaddr = util.convert_to_eaddr(eaddr)
-    if eaddr in Homework.st['permitted']:
-        del Homework.st['permitted'][eaddr]
+    del Homework.st['permitted'][eaddr]
     Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"deny\")"%(eaddr))
     #data = Homework._dhcp.revoke_mac_addr(eaddr)
     return status()
@@ -212,7 +210,6 @@ def ws_whitelist_eth(request, args):
     eaddr = args.get('eaddr')
     if not eaddr: return webservice.badRequest(request, "missing eaddr")
     eaddr = util.convert_to_eaddr(eaddr)
-    data = Homework._dhcp.whitelist_mac_addr(eaddr)
     Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"deny\")"%(eaddr))
     return json.dumps(Homework._dhcp.get_blacklist_mac_status())
 
@@ -223,8 +220,7 @@ def ws_blacklist_eth(request, args):
     eaddr = util.convert_to_eaddr(eaddr)
     if eaddr in Homework.st['permitted']:
         del Homework.st['permitted'][eaddr]
-        Homework._dhcp.revoke_mac_addr(eaddr)
-    Homework._dhcp.blacklist_mac_addr(eaddr)
+#        Homework._dhcp.revoke_mac_addr(eaddr)
     Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"blacklist\")"%(eaddr))
     return json.dumps(Homework._dhcp.get_blacklist_mac_status())
 
@@ -255,18 +251,6 @@ class homework(core.Component):
                 print "PERMIT", eaddr
                 eaddr = util.convert_to_eaddr(eaddr)
                 self.st['permitted'][eaddr] = None
-    
-#    def permit_ether_addr(self, eaddr):
-#        if not self.st:
-#            print "some object is not initialized yet"
-#            return False
-#        else:
-#            eaddr = util.convert_to_eaddr(eaddr)
-#            return (eaddr in self.st['permitted'].keys())
-
-
-    def hello_world(self):
-        return "Hello World!!!"
     
     def install(self):
         Homework.register_for_datapath_join(datapath_join)
