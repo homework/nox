@@ -3,7 +3,9 @@
     {
         "name": "homework",
             "dependencies": [
-           "pydhcp",
+            "pyhwdb",
+                "hwdbcontroller",
+            "pydhcp",
             "webservice"
                 ],
             "python": "nox.webapps.homework.homework"

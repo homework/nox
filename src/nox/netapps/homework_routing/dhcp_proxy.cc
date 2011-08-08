@@ -37,7 +37,6 @@ namespace vigil {
         dhcp_proxy::configure(PyObject* configuration) 
         {
             c->resolve(p_routing);
-            this->p_routing->register_proxy((dhcp_proxy *)this);
             lg.dbg("Configure called in c++ wrapper");
         }
 

@@ -14,13 +14,15 @@
 ## You should have received a copy of the GNU Affero General Public
 ## License along with this program.  If not, see
 ## <http://www.gnu.org/licenses/>.
-    
+
 import pprint, time, re
 ppf = pprint.pprint
 import simplejson as json
 
 from nox.webapps.webservice import webservice
 from nox.netapps.homework_routing.pydhcp import pydhcp_app
+from nox.netapps.hwdb.pyhwdb import pyhwdb
+
 from nox.lib import core, openflow, packet, util
 from nox.lib.packet import ethernet, ipv4
 
@@ -28,42 +30,13 @@ import os
 
 Homework = None
 
-EAPOL_TYPE = 0x888e
 EMPTY_JSON = "{}"
 TICKER = 1
 
-class Actions:
-    """ Some useful compound actions. """
-    
-    really_flood = [
-        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]],
-        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_IN_PORT]],
-        ]
-    
-    flood_and_process = [
-        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]],
-        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_NORMAL]],
-        ]
-    
-    really_flood_and_process = [
-        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_FLOOD]],
-        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_IN_PORT]],
-        [openflow.OFPAT_OUTPUT, [-1, openflow.OFPP_NORMAL]],
-        ]
 
 ##
 ## utility functions
 ##
-    
-def invert_flow(flow):
-    """ Swap source and destination L2 and L3 addresses. """
-    s, d = flow['dl_src'], flow['dl_dst']
-    flow['dl_src'], flow['dl_dst'] = d, s
-
-    s, d = flow['nw_src'], flow['nw_dst']
-    flow['nw_src'], flow['nw_dst'] = d, s
-    
-    return flow
 
 def is_valid_ip(ip):
     """ Test if string is valid representation of IP address. """
@@ -84,13 +57,6 @@ def is_valid_eth(eth):
     try: return reduce(lambda acc,byte: (0 <= byte <= 256) and acc,
                        map(lambda b: int(b,16), bytes), True)
     except ValueError: return False
-
-def ticker():
-    """ Placeholder ticker callback. """
-    now = time.time()
-    print "TICK", now
-    Homework.post_callback(TICKER, ticker)
-    return True
 
 ##
 ## webservice boilerplate: URL path component types
@@ -136,35 +102,6 @@ def datapath_join(dpid, attrs):
     """ Event handler for controller detection of live datapath (port). """
     Homework.st['ports'][dpid] = attrs['ports'][:]
 
-    # Homework.install_datapath_flow(
-    #     dpid,
-    #     { core.DL_TYPE: ethernet.ethernet.ARP_TYPE, },
-    #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-    #     Actions.flood_and_process,
-    #     )
-    # Homework.install_datapath_flow(
-    #     dpid,
-    #     { core.DL_TYPE: ethernet.ethernet.RARP_TYPE, },
-    #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-    #     Actions.flood_and_process,
-    #     )
-#    Homework.install_datapath_flow(
-#        dpid,
-#        { core.DL_TYPE: EAPOL_TYPE, },
-#        openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-#        Actions.flood_and_process,
-#        )
-
-    # pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE, }
-    # for eaddr, ipaddrs in Homework.st['permitted'].items():
-    #     pattern[core.DL_SRC] = eaddr
-    #     if not ipaddrs: 
-    #         Homework.install_datapath_flow(
-    #             dpid, pattern,
-    #             openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-    #             Actions.really_flood,
-    #             )
-    
 def datapath_leave(dpid):
     """ Event handler for controller detection of datapath going down. """
     del Homework.st['ports'][dpid]
@@ -177,34 +114,12 @@ def permit(eaddr, ipaddr=None):
     """ Permit tx/rx to/from a specified Ethernet address."""
     
     print "PERMIT", eaddr, ipaddr
-    if not (eaddr or ipaddr): return 
+    if not (eaddr or ipaddr): return
     
     eaddr = util.convert_to_eaddr(eaddr)
-    # if not ipaddr:
-    #     old_ipaddrs = Homework.st['permitted'].get(eaddr)
     Homework.st['permitted'][eaddr] = None
-
-#    for dpid in Homework.st['ports']:
-        ## permit the forward path to this eaddr/ipaddr
-        # Homework.install_datapath_flow(
-        #     dpid, pattern,
-        #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        #     Actions.really_flood,
-        #     )
-
-        ## ...and the reverse path similarly
-        # del pattern[core.DL_SRC]
-        # pattern[core.DL_DST] = eaddr
-        # if ipaddr:
-        #     del pattern[core.NW_SRC]
-        #     pattern[core.NW_DST] = ipaddr
-        
-        # Homework.install_datapath_flow(
-        #     dpid, pattern,
-        #     openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
-        #     Actions.really_flood,
-        #     )
-
+    Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"permit\")"%(eaddr))
+    #self._hwdb.insert("")
     return status()
 
 def ws_permit(request, args):
@@ -226,39 +141,29 @@ def ws_permit_group(request, args):
     if content == None:
         print "error in getting state"
         return  webservice.badRequest(request, "missing eaddr")
-
     for eaddr in content:
         if not is_valid_eth(eaddr):
             return   webservice.badRequest(request, "malformed eaddr " + eaddr)
-
     for eaddr in content:
         permit(eaddr)
     return status()
 
-#    eaddr = args.get('eaddr')
-#    if not eaddr: return webservice.badRequest(request, "missing eaddr")
-
-    return '{"status" : "success"}' #permit(eaddr)
-
 def deny(eaddr, ipaddr = None):
     """ Deny tx/rx to/from a specified Ethernet address. """
-                                                            
     print "DENY", eaddr, ipaddr
-    if not (eaddr or ipaddr): return 
-    
+    if not (eaddr or ipaddr): return
     eaddr = util.convert_to_eaddr(eaddr)
     if eaddr in Homework.st['permitted']:
         del Homework.st['permitted'][eaddr]
-    data = Homework._dhcp.revoke_mac_addr(eaddr)
+    Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"deny\")"%(eaddr))
+    #data = Homework._dhcp.revoke_mac_addr(eaddr)
     return status()
 
 def ws_deny(request, args):
     """ WS interface to deny(). """
-                                   
     eaddr = args.get('eaddr')
     if not eaddr: return webservice.badRequest(request, "missing eaddr")
     ipaddr = args.get('ipaddr')
-
     return deny(eaddr, ipaddr)
 
 #
@@ -280,8 +185,6 @@ def ws_deny_group(request, args):
     for eaddr in content:
         deny(eaddr)
     return status()
-
-
 
 def status(eaddr=None):
     """ Permit/Deny status of specified/all addresses. """
@@ -310,6 +213,7 @@ def ws_whitelist_eth(request, args):
     if not eaddr: return webservice.badRequest(request, "missing eaddr")
     eaddr = util.convert_to_eaddr(eaddr)
     data = Homework._dhcp.whitelist_mac_addr(eaddr)
+    Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"deny\")"%(eaddr))
     return json.dumps(Homework._dhcp.get_blacklist_mac_status())
 
 def ws_blacklist_eth(request, args):
@@ -321,7 +225,9 @@ def ws_blacklist_eth(request, args):
         del Homework.st['permitted'][eaddr]
         Homework._dhcp.revoke_mac_addr(eaddr)
     Homework._dhcp.blacklist_mac_addr(eaddr)
+    Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"blacklist\")"%(eaddr))
     return json.dumps(Homework._dhcp.get_blacklist_mac_status())
+
 
 def ws_blacklist_status(request, args):
     """ get a list of mac addresses in the blacklist list. """
@@ -350,15 +256,13 @@ class homework(core.Component):
                 eaddr = util.convert_to_eaddr(eaddr)
                 self.st['permitted'][eaddr] = None
     
-#        print "PERMIT", self.st['permitted'].keys()
-            
-    def permit_ether_addr(self, eaddr):
-        if not self.st:
-            print "some object is not initialized yet"
-            return False
-        else:
-            eaddr = util.convert_to_eaddr(eaddr)
-            return (eaddr in self.st['permitted'].keys())
+#    def permit_ether_addr(self, eaddr):
+#        if not self.st:
+#            print "some object is not initialized yet"
+#            return False
+#        else:
+#            eaddr = util.convert_to_eaddr(eaddr)
+#            return (eaddr in self.st['permitted'].keys())
 
 
     def hello_world(self):
@@ -374,15 +278,16 @@ class homework(core.Component):
         self._dhcp = self.resolve(pydhcp_app)
         print self._dhcp.get_dhcp_mapping()
         self._dhcp.register_object(self)
-
+        
+        # gettting a reference for the hwdb component
+        self._hwdb = self.resolve(pyhwdb)
+        # print "hwdb obj " + str(self._hwdb)
 
         homeworkp = webservice.WSPathStaticString("homework")
 
         permitp = webservice.WSPathStaticString("permit")
         permit_eth_path = (homeworkp, permitp, WSPathEthAddress(),)
         v1.register_request(ws_permit, "POST", permit_eth_path, """Permit an Ethernet address.""")
-##         permit_ip_path = (homeworkp, permitp, WSPathEthAddress(), WSPathIPAddress(),)
-##         v1.register_request(ws_permit, "POST", permit_ip_path, """Permit an IP address.""")
 
         permit_groupp = webservice.WSPathStaticString("permit_group")
         permit_group_eth_path = (homeworkp, permit_groupp)
@@ -392,8 +297,6 @@ represented as json array in the body of the http post.""")
         denyp = webservice.WSPathStaticString("deny")
         deny_eth_path = (homeworkp, denyp, WSPathEthAddress(),)
         v1.register_request(ws_deny, "POST", deny_eth_path, """Deny an Ethernet address.""")
-##         deny_ip_path = (homeworkp, denyp, WSPathEthAddress(), WSPathIPAddress(),)
-##         v1.register_request(ws_deny, "POST", deny_ip_path, """Deny an IP address.""")
 
         deny_groupp = webservice.WSPathStaticString("deny_group")
         deny_group_eth_path = (homeworkp, deny_groupp)

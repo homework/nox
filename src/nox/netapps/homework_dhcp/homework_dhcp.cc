@@ -35,6 +35,7 @@ namespace vigil
 
     void homework_dhcp::configure(const Configuration* c) {
         lg.dbg(" Configure called ");
+        this->resolve(hwdb);
         this->routable = cidr_ipaddr(ipaddr(ROUTABLE_SUBNET), ROUTABLE_NETMASK);
     }
 
@@ -84,15 +85,6 @@ namespace vigil
         struct timeval tv = {60,0};
         post(boost::bind(&homework_dhcp::clean_leases, this), tv);
         
-        rpc = NULL;
-        if (!rpc_init(0)) {
-            lg.err("Failure to initialize rpc system");
-            return;
-        }
-        if (!(rpc = rpc_connect(const_cast<char *>(host), port, const_cast<char *>(service), 1l))) {
-            lg.err("Failure to connect to HWDB at %s:%05u", host, port);
-            return;
-        }
 
         s = socket(AF_INET, SOCK_DGRAM, 0);
         if (s==-1) {
@@ -142,20 +134,8 @@ namespace vigil
 
     void homework_dhcp::insert_hwdb(const char *action, const char *ip, 
             const char *mac, const char *hostname) {
-
-        char q[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
-        unsigned int rlen = 0;
-
-        char stsmsg[RTAB_MSG_MAX_LENGTH];
-
-        unsigned int bytes;
-
-        if (!rpc) {
-            lg.err("Error: not connected to HWDB.");
-            return;
-        }
-
-        bytes = 0;
+        char q[SOCK_RECV_BUF_LEN];
+        unsigned int bytes = 0;
         memset(q, 0, SOCK_RECV_BUF_LEN);
         bytes += sprintf(q + bytes, "SQL:insert into Leases values (" );
         /* action */
@@ -167,14 +147,7 @@ namespace vigil
         /* hostname (optional) */
         bytes += sprintf(q + bytes, "\"%s\")\n",hostname);
 
-        fprintf(stderr, "%s", q);
-        if (! rpc_call(rpc, q, bytes, r, sizeof(r), &rlen)) {
-            lg.err("rpc_call() failed");
-            return;
-        }
-        r[rlen] = '\0';
-        if (rtab_status(r, stsmsg))
-            lg.err( "RPC error: %s", stsmsg);
+        this->hwdb->insert(q);
     }
 
     /////////////////////////////////////

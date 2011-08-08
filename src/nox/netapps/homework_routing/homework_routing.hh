@@ -145,11 +145,6 @@ namespace vigil
            * required in order to get a list of registered switches
            */
           Disposition datapath_leave_handler(const Event& e);
-          /**
-           * register the proxy class between the c++ module and the python module. 
-           * useful in order to have bidirectional communication.
-           */
-          void register_proxy(dhcp_proxy  *proxy);
 
           /**
            * a method to revoke the right to a host with the specific ethernet address
@@ -160,7 +155,7 @@ namespace vigil
           /**
            * a method to revoke access to a host on the level of the physical layer. 
            */
-          void blacklist_mac(ethernetaddr& ether);
+          void blacklist_mac(const ethernetaddr& ether);
 
           /**
            * a method to revoke access to a host on the level of the physical layer. 
@@ -173,11 +168,14 @@ namespace vigil
                   std::vector<boost::shared_array<char> > act);
           std::vector<std::string> get_dhcp_mapping();
            bool check_access(const ethernetaddr& ether);
-     private:
-//          void insert_hwdb(const char *action, const char *ip, const char *mac, const char *hostname);
+           Disposition device_handler(const Event& e);
+
+      private:
+           void permit_mac(const ethernetaddr& ether);
+
           bool extract_headers(uint8_t *data, uint32_t data_len, struct nw_hdr *hdr);
           //a pointer to the proxy of the module
-          dhcp_proxy *p_dhcp_proxy;
+//          dhcp_proxy *p_dhcp_proxy;
           homework_dhcp *p_dhcp;
           //netmasks
           cidr_ipaddr routable, non_routable, multicast, init_subnet;
@@ -191,9 +189,8 @@ namespace vigil
 
           //store blacklisted mac addresses -> this might need to persist over reboots.
           std::set<ethernetaddr> mac_blacklist;
-
-          /* HWDB */
-//          RpcConnection rpc;
+          //store permitted mac addreses
+          std::set<ethernetaddr> mac_permit;
   };
 }
 

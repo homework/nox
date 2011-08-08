@@ -23,6 +23,7 @@
 #include "component.hh"
 #include "config.h"
 #include "dhcp_msg.hh"
+#include "hwdb/control.hh"
 
 //hwdb include files
 extern "C" {
@@ -79,12 +80,12 @@ namespace vigil
 
     /** \brief homework_dhcp
      * \ingroup noxcomponents
-     * 
+     *
      * @author
      * @date
      */
     class homework_dhcp
-        : public Component 
+        : public Component
     {
         public:
             /** \brief Constructor of homework_dhcp.
@@ -97,7 +98,7 @@ namespace vigil
             {}
 
             /** \brief Configure homework_dhcp.
-             * 
+             *
              * Parse the configuration, register event handlers, and
              * resolve any dependencies.
              *
@@ -106,7 +107,7 @@ namespace vigil
             void configure(const Configuration* c);
 
             /** \brief Start homework_dhcp.
-             * 
+             *
              * Start the component. For example, if any threads require
              * starting, do it now.
              */
@@ -115,7 +116,7 @@ namespace vigil
             /**
              * \brief dhcp packet handler
              *
-             * A generic handler for packet_in events. This hopefully 
+             * A generic handler for packet_in events. This hopefully
              * will mature latter to more specific functionality.
              */
             Disposition dhcp_handler(const Event& e);
@@ -125,13 +126,13 @@ namespace vigil
              *
              * \return a vector of string that describe each mapping.
              */
-            std::vector<std::string> get_dhcp_mapping(); 
+            std::vector<std::string> get_dhcp_mapping();
 
             /** \brief Get instance of homework_dhcp.
              * @param c context
              * @param component reference to component
              */
-            static void getInstance(const container::Context* c, 
+            static void getInstance(const container::Context* c,
                     homework_dhcp*& component);
 
             /**
@@ -151,27 +152,27 @@ namespace vigil
 
             bool is_valid_mapping(ipaddr ip, ethernetaddr mac);
             void clean_leases();
-       private:
+        private:
             bool send_flow_modification (Flow fl, uint32_t wildcard, datapathid datapath_id,
                     uint32_t buffer_id, uint16_t command,
-                    uint16_t idle_timeout, 
+                    uint16_t idle_timeout,
                     std::vector<boost::shared_array<char> > act);
 
             //datapath storage
             std::vector<datapathid*> registered_datapath;
-            void insert_hwdb(const char *action, const char *ip, const char *mac, 
+            void insert_hwdb(const char *action, const char *ip, const char *mac,
                     const char *hostname);
 
             bool add_addr(uint32_t ip);
             bool del_addr(uint32_t ip);
             ipaddr select_ip(const ethernetaddr&, uint8_t, uint32_t) ;
-            bool extract_headers(uint8_t *, uint32_t, struct nw_hdr *); 
-            size_t generate_dhcp_reply(uint8_t **ret, struct dhcp_packet  * dhcp, 
+            bool extract_headers(uint8_t *, uint32_t, struct nw_hdr *);
+            size_t generate_dhcp_reply(uint8_t **ret, struct dhcp_packet  * dhcp,
                     uint16_t dhcp_len, Flow *flow, uint32_t send_ip,
                     uint8_t dhcp_msg_type, uint32_t lease);
 
-            //storage of the ip to mac translation throught the dhcp protocol 
-            std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;    
+            //storage of the ip to mac translation throught the dhcp protocol
+            std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;
             std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
 
             uint32_t find_free_ip(const ipaddr& subnet, int netmask);
@@ -179,12 +180,14 @@ namespace vigil
             cidr_ipaddr routable;
 
             /* HWDB */
-            RpcConnection rpc;
-            //netlink control  
+            HWDBControl *hwdb;
+
+            //netlink control
             struct nl_sock *sk;        //the socket to talk to netlink
-            int ifindex;               //index of the interface. 
-            // TODO: not sure if this change if 
-            // interfaces go up and down. 
+            int ifindex;               //index of the interface.
+
+            // TODO: not sure if this change if
+            // interfaces go up and down.
             ethernetaddr bridge_mac;
     };
 }
