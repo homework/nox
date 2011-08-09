@@ -22,9 +22,7 @@ import simplejson as json
 from nox.webapps.webservice import webservice
 from nox.netapps.dhcp.pydhcp import pydhcp_app
 from nox.lib import core, openflow, packet, util
-from nox.lib.packet import ethernet, ipv4
-
-import os
+from nox.lib.packet import ethernet, ipv4, dns
 
 Homework = None
 
@@ -134,7 +132,21 @@ class WSPathEthAddress(webservice.WSPathComponent):
     
 def datapath_join(dpid, attrs):
     """ Event handler for controller detection of live datapath (port). """
+    print "Datapath join"
+    print dpid
+    print attrs
     Homework.st['ports'][dpid] = attrs['ports'][:]
+
+## XXX think this is redundant as haris' dhcp module, on which this
+## depends cf. meta.json, already installs a rule to ensure all DHCP
+## is pulled to the controller
+    
+    Homework.install_datapath_flow(dpid, 
+                                   { core.DL_TYPE : ethernet.ethernet.IP_TYPE,
+                                     core.NW_PROTO : ipv4.ipv4.UDP_PROTOCOL,
+                                     core.TP_DST : 53 },
+                                   openflow.OFP_FLOW_PERMANENT, openflow.OFP_FLOW_PERMANENT,
+                                   [[openflow.OFPAT_OUTPUT, [0, openflow.OFPP_CONTROLLER]]])
 
     # Homework.install_datapath_flow(
     #     dpid,
@@ -173,16 +185,32 @@ def datapath_leave(dpid):
 ## webservice entry points
 ##
     
+
+def dns_permit(eaddr, domain):
+
+    print "DNS PERMIT", eaddr, domain
+    if not (eaddr and domain): return 
+    
+    eaddr = util.convert_to_eaddr(eaddr)
+    Homework.st['permitted'][eaddr][domain] = None
+    
+    return status()    
+    
 def permit(eaddr, ipaddr=None):
     """ Permit tx/rx to/from a specified Ethernet address."""
     
     print "PERMIT", eaddr, ipaddr
     if not (eaddr or ipaddr): return 
     
+    ## TODO Add rule to forward dns requests
+    
     eaddr = util.convert_to_eaddr(eaddr)
-    # if not ipaddr:
-    #     old_ipaddrs = Homework.st['permitted'].get(eaddr)
-    Homework.st['permitted'][eaddr] = None
+    pattern = { core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+                core.DL_SRC: eaddr,
+                }
+    if not ipaddr:
+        old_ipaddrs = Homework.st['permitted'].get(eaddr)
+        Homework.st['permitted'][eaddr] = None
 
 #    for dpid in Homework.st['ports']:
         ## permit the forward path to this eaddr/ipaddr
@@ -215,6 +243,32 @@ def ws_permit(request, args):
 
     ipaddr = args.get('ipaddr')
     return permit(eaddr, ipaddr)
+
+#
+# curl -i -k -X POST -H "Content-Type: application/json" \
+# -d "[\"11:11:11:11:11:11\",\"22:22:22:22:22:22\"]" \
+# https://10.1.0.1/ws.v1/homework/permit_group
+#
+def ws_dns_permit(request, args):
+    """ WS interface to dns_permit(). """
+
+    print request
+    print args
+
+    content = webservice.json_parse_message_body(request)
+    if content == None:
+        print "error in getting state"
+        return  webservice.badRequest(request, "missing eaddr")
+
+    for permititem in content:
+        if not is_valid_eth(permititem['eaddr']):
+            return   webservice.badRequest(request, "malformed eaddr " + eaddr)
+
+    for permititem in content:
+        dns_permit(permititem['eaddr'], permititem['domain'])
+        
+    return status()
+        
 #
 # curl -i -k -X POST -H "Content-Type: application/json" \
 # -d "[\"11:11:11:11:11:11\",\"22:22:22:22:22:22\"]" \
@@ -240,6 +294,25 @@ def ws_permit_group(request, args):
 
     return '{"status" : "success"}' #permit(eaddr)
 
+def dns_deny(eaddr, domain):
+    """ WS interface to dns_deny(). """
+    
+    print request
+    print args
+
+    content = webservice.json_parse_message_body(request)
+    if content == None:
+        print "error in getting state"
+        return  webservice.badRequest(request, "missing eaddr")
+
+    for permititem in content:
+        if not is_valid_eth(permititem['eaddr']):
+            return   webservice.badRequest(request, "malformed eaddr " + eaddr)
+
+    for permititem in content:
+        dns_deny(permititem['eaddr'], permititem['domain'])
+
+
 def deny(eaddr, ipaddr = None):
     """ Deny tx/rx to/from a specified Ethernet address. """
                                                             
@@ -260,6 +333,16 @@ def ws_deny(request, args):
     ipaddr = args.get('ipaddr')
 
     return deny(eaddr, ipaddr)
+
+def ws_dns_deny(request, args):
+    """ WS interface to dns_deny(). """
+
+    eaddr = args.get('eaddr')
+    domain = args.get('domain')
+    if not eaddr: return webservice.badRequest(request, "missing eaddr")
+    if not domain: return webservice.badRequest(request, "missing domain")    
+
+    return dns_deny(eaddr, domain)
 
 #
 # curl -i -k -X POST -H "Content-Type: application/json" \
@@ -287,7 +370,7 @@ def status(eaddr=None):
     """ Permit/Deny status of specified/all addresses. """
 
     if not eaddr:
-        permitted = { "permitted": list(map(str, Homework.st['permitted'].keys())), }
+        permitted = { "permitted": list(map(str, Homework.st['permitted'].keys())), "dnsPermitted": list(map(str, Homework.st['dnsPermitted'].keys())),}
     else:
         eaddr = util.convert_to_eaddr(eaddr)
         result = "permitted" if eaddr in permitted else "denied"
@@ -336,22 +419,14 @@ class homework(core.Component):
     
     def __init__(self, ctxt):
         core.Component.__init__(self, ctxt)
+
         global Homework
         Homework = self
         Homework.st = { 'permitted': {}, ## eaddr -> None ## [ipaddr, ...]
                         'ports': {},     ## dpid -> attrs
+                        'dnsPermitted': {},
                         }
-        if os.path.exists("/etc/homework/whitelist.conf") : 
-            permit_list = open("/etc/homework/whitelist.conf", "r")
-
-            for eaddr in permit_list:
-                eaddr = eaddr.strip()
-                print "PERMIT", eaddr
-                eaddr = util.convert_to_eaddr(eaddr)
-                self.st['permitted'][eaddr] = None
     
-#        print "PERMIT", self.st['permitted'].keys()
-            
     def permit_ether_addr(self, eaddr):
         if not self.st:
             print "some object is not initialized yet"
@@ -361,12 +436,39 @@ class homework(core.Component):
             return (eaddr in self.st['permitted'].keys())
 
 
+    def permit_dns(self, eaddr, domain):
+        if not self.st:
+            print "some object is not initialized yet"
+            return False
+        else:
+            eaddr = util.convert_to_eaddr(eaddr)
+            return (eaddr in self.st['dnsPermitted'].keys() and domain in self.st['dnsPermitted'][eaddr].keys())
+        
+
     def hello_world(self):
         return "Hello World!!!"
+    
+    def handle_dns(self, dpid, inport, ofp_reason, total_frame_len, buffer_id, packet):
+        print "Handle DNS"
+        dnsh = packet.find('dns')
+        if not dnsh:
+            print 'Handle DNS: Received invalid DNS packet'
+            return CONTINUE
+
+        print str(dnsh)
+        print dnsh
+
+        return CONTINUE
     
     def install(self):
         Homework.register_for_datapath_join(datapath_join)
         Homework.register_for_datapath_leave(datapath_leave)
+
+
+        match_src = { core.DL_TYPE: ethernet.ethernet.IP_TYPE,
+                      core.NW_PROTO : ipv4.ipv4.UDP_PROTOCOL,
+                      core.TP_DST : 53}
+        self.register_for_packet_match(self.handle_dns, 0xffff, match_src)
 
         ws = self.resolve(str(webservice.webservice))
         v1 = ws.get_version("1")
@@ -389,6 +491,10 @@ class homework(core.Component):
         v1.register_request(ws_permit_group, "POST", permit_group_eth_path, """Permit a set of  Ethernet addresses 
 represented as json array in the body of the http post.""")
 
+        dns_permitp = webservice.WSPathStaticString("dnspermit")
+        dns_permit_eth_path = (homeworkp, dns_permitp)
+        v1.register_request(ws_dns_permit, "POST", dns_permit_eth_path, """Permit a DNS address.""")
+
         denyp = webservice.WSPathStaticString("deny")
         deny_eth_path = (homeworkp, denyp, WSPathEthAddress(),)
         v1.register_request(ws_deny, "POST", deny_eth_path, """Deny an Ethernet address.""")
@@ -399,6 +505,10 @@ represented as json array in the body of the http post.""")
         deny_group_eth_path = (homeworkp, deny_groupp)
         v1.register_request(ws_deny_group, "POST", deny_group_eth_path, """Deny access to a set of  Ethernet addresses 
 represented as json array in the body of the http post.""")
+
+        dns_denyp = webservice.WSPathStaticString("dnsdeny")
+        dns_deny_eth_path = (homeworkp, dns_denyp)
+        v1.register_request(ws_dns_deny, "POST", dns_deny_eth_path, """Deny a DNS address.""")
 
         statusp = webservice.WSPathStaticString("status")
         status_path = (homeworkp, statusp,)
