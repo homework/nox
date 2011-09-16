@@ -11,6 +11,7 @@
 
 #include "lease.hh"
 
+
 #define DEVICE_QUERY_DELAY 1
 
 namespace vigil {
@@ -57,7 +58,7 @@ namespace vigil {
         }
 
         /* Query persistent hwdb server.*/
-        restart();
+        /* restart(); */
 
         connect();
 
@@ -66,20 +67,21 @@ namespace vigil {
          *
          * Spawns a new cooperative thread.
          */
-        //offer();
+        offer();
 
         return ;
     }
 
-    Disposition HWDBControl::handle_bootstrap (const Event& e) {
+	Disposition HWDBControl::handle_bootstrap (const Event& e) {
 
-        /*
+		/*
          * By default, we receive callbacks from HWDB, so there is
          * no need to periodically query hwdb. However, as an exa-
          * mple, consider the following:
-         */ 
-     timeval tv = {DEVICE_QUERY_DELAY, 0};
-     post(boost::bind(&HWDBControl::timer, this), tv);
+         */
+ 
+		/* timeval tv = {DEVICE_QUERY_DELAY, 0};
+		post(boost::bind(&HWDBControl::timer, this), tv); */
 
     return CONTINUE;
 }
@@ -237,9 +239,8 @@ void HWDBControl::restart(void) {
 
     int done;
 
-    host = HWDB_SERVER_ADDR;
     /* Connect to persistent storage server */
-//        port = HWDB_PERSISTSERVER_PORT;
+    host = HWDB_SERVER_ADDR;
     port = HWDB_PERSISTSERVER_PORT;
 
     service = "PDB";
@@ -302,22 +303,34 @@ void HWDBControl::restart(void) {
 }
 
     map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
-        const char *host;
-        unsigned short port;
-        const char *service;
-        RpcConnection persist_rpc;
         map<ethernetaddr, Lease> ret;
+		return ret;
+	}
+	
+/*
+map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
+	
+	const char *host;
+	unsigned short port;
+	const char *service;
+	
+	RpcConnection persist_rpc;
+	
+	map<ethernetaddr, Lease> ret;
 
-        char question[SOCK_RECV_BUF_LEN];
-        char response[SOCK_RECV_BUF_LEN];
-        unsigned int length;
-        Rtab *results;
-        char msg[RTAB_MSG_MAX_LENGTH];
+	char question[SOCK_RECV_BUF_LEN];
+	
+	char response[SOCK_RECV_BUF_LEN];
+	
+	unsigned int length;
+	
+	Rtab *results;
+	char msg[RTAB_MSG_MAX_LENGTH];
 
-        int i, done = 0;
+	int i, done = 0;
 
-        host = HWDB_SERVER_ADDR;
-        /* Connect to persistent storage server */
+	host = HWDB_SERVER_ADDR;
+	// Connect to persistent storage server
         port = HWDB_PERSISTSERVER_PORT;
         service = "PDB";
 
@@ -328,7 +341,7 @@ void HWDBControl::restart(void) {
             exit(-1);
         }
 
-        /* Query until all results have been returned. */
+        // Query until all results have been returned.
         while (! done) {
             done = 1;
             if (last) {
@@ -351,27 +364,27 @@ void HWDBControl::restart(void) {
             if (results && ! rtab_status(response, msg)) {
                 rtab_print(results);
                 for (i = 0; i < results->nrows; i++) {
-                    /* map */
+                    // map
                     char **column = rtab_getrow(results, i);
-                    /* First column is the timestamp. */
+                    // First column is the timestamp.
                     last = string_to_timestamp(column[0]);
                     //ret[ethernetaddr(string(column[2]))] = ipaddr(string(column[3]));
                     lg.info("Lease is %s -> %s\n", column[2], column[3]);
                     ret[ethernetaddr(string(column[2]))] = Lease(last,
-                            column[1], /* st */
-                            column[2], /* mc */
-                            column[3], /* ip */
-                            column[4]  /* hn */
+                            column[1], // st
+                            column[2], // mc
+                            column[3], // ip
+                            column[4]  // hn
                             );
 
                 }
-                done = (results->nrows == 0); /* exit */
+                done = (results->nrows == 0); // exit
 
             }
             lg.err("returned rec %d, done %d\n", results->nrows, done);
             rtab_free(results);
         }
-        /* At this point, all records have been processed */
+        // At this point, all records have been processed
         last = 0LL;
 
         //timeval now;
@@ -381,12 +394,13 @@ void HWDBControl::restart(void) {
         //ret[ethernetaddr("00:23:cd:c7:93:b5")] = Lease(ipaddr("10.2.0.5"), ethernetaddr("00:23:cd:c7:93:b5"), 
         //        "", now.tv_sec, DHCP_STATE_ADD);
 
-        /* Disconnect from persistent storage */
+        // Disconnect from persistent storage
         rpc_disconnect(persist_rpc);
 
         return ret;
 
     }
+	*/
 
 void HWDBControl::offer(void) {
 

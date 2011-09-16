@@ -25,13 +25,6 @@
 #include "dhcp_msg.hh"
 #include "hwdb/control.hh"
 
-//hwdb include files
-extern "C" {
-#include <hwdb/config.h>
-#include <hwdb/srpc.h>
-#include <hwdb/rtab.h>
-}
-
 #ifdef LOG4CXX_ENABLED
 #include <boost/format.hpp>
 #include "log4cxx/logger.h"
