@@ -31,6 +31,12 @@ class pyhwdb(Component):
 	def getInterface(self):
 		return str(pyhwdb)
 
+	def call(self, str):
+		return self.ctrl.call(str)
+		
+	def postEvent(self, list):
+		self.ctrl.postEvent(list)
+
 	# Expose additional methods here.
 	def incall(self, str):
 		self.ctrl.incall(str)

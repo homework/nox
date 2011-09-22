@@ -5,6 +5,8 @@
 #include "swigpyrun.h"
 
 #include "vlog.hh"
+#include <list>
+
 
 using namespace std;
 using namespace vigil;
@@ -46,11 +48,42 @@ namespace vigil {
 			ctrl->incall(s);
 		}
 		
+		void hwdb_proxy::postEvent(PyObject * pylist)
+		{
+			int size = PyList_Size(pylist);
+			if(size == 0)
+			{
+				return;
+			}
+
+		    list<HWDBDevice> mylist = list<HWDBDevice>();
+			for(int index = 0; index < size; index++)
+			{
+				PyObject* object = PyList_GetItem(pylist, index);
+				PyObject* macObj = PyDict_GetItemString(object, "mac");
+				PyObject* actObj = PyDict_GetItemString(object, "action");
+
+		        mylist.push_back(*(new HWDBDevice(PyString_AsString(macObj), PyString_AsString(actObj))));
+			}
+
+	        ctrl->post(new HWDBEvent(mylist)); /* HWDBEvent creates a deep copy */
+		}
+
 		int hwdb_proxy::insert(char* s) {
 			
 			return ctrl->insert(s);
 		}
 
+	    PyObject* hwdb_proxy::call(char * query) {
+	        char response[SOCK_RECV_BUF_LEN];
+	        unsigned int length;
+
+	        length = ctrl->query(query, response, SOCK_RECV_BUF_LEN);
+
+	        response[length] = '\0';
+	        lg.info("[%d] %s", length, response);
+
+	        return PyString_FromString(response);
+	    }
 	}
 }
-

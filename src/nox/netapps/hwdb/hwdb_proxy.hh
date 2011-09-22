@@ -24,6 +24,10 @@ namespace vigil {
 				/* More public interface methods... */
 				void incall(char *);
 			
+				PyObject* call(char * query);
+
+				void postEvent(PyObject* list);
+
 				int insert(char *);
 
 			protected:
