@@ -40,8 +40,8 @@ namespace vigil {
 
         register_event(HWDBEvent::static_get_name());
 
-        register_handler<Bootstrap_complete_event>
-            (boost::bind(&HWDBControl::handle_bootstrap, this, _1));
+        //register_handler<Bootstrap_complete_event>
+        //    (boost::bind(&HWDBControl::handle_bootstrap, this, _1));
 
         register_handler<HWDBEvent>
             (boost::bind(&HWDBControl::hwdb_handler, this, _1));
@@ -67,7 +67,7 @@ namespace vigil {
          *
          * Spawns a new cooperative thread.
          */
-        offer();
+        //offer();
 
         return ;
     }
@@ -241,7 +241,7 @@ void HWDBControl::restart(void) {
 
     /* Connect to persistent storage server */
     host = HWDB_SERVER_ADDR;
-    port = HWDB_PERSISTSERVER_PORT;
+    port = HWDB_SERVER_PORT;
 
     service = "PDB";
 
@@ -331,7 +331,7 @@ map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
 
 	host = HWDB_SERVER_ADDR;
 	// Connect to persistent storage server
-        port = HWDB_PERSISTSERVER_PORT;
+        port = HWDB_SERVER_PORT;
         service = "PDB";
 
         if (! (persist_rpc = rpc_connect(const_cast<char *>(host), port, 
