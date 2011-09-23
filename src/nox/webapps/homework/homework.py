@@ -15,13 +15,13 @@
 ## License along with this program.  If not, see
 ## <http://www.gnu.org/licenses/>.
 
+import sys, traceback
 import pprint, time, re
 ppf = pprint.pprint
 import simplejson as json
 
 from threading import Thread
 
-from nox.webapps.webservice import webservice
 from nox.netapps.homework_routing.pydhcp import pydhcp_app
 from nox.netapps.hwdb.pyhwdb import pyhwdb
 
@@ -98,6 +98,47 @@ def deny(eaddr, ipaddr = None):
     #data = Homework._dhcp.revoke_mac_addr(eaddr)
     return status()
 
+def parseMacAddress(str):
+    if str.startswith('ETH|'):
+        parts = str.split('|')
+        mac = parts[1]
+        if ":" not in mac:
+            return mac[0:2] + ":" + mac[2:4] + ":" + mac[4:6] + ":" + mac[6:8] + ":" + mac[8:10] + ":" + mac[10:12]
+        return mac
+
+    elif str.startswith('IP|'):
+        parts = str.split('|')
+
+def parseResult(str):
+    result = []
+    lines = str.split("\n")
+    del lines[0]
+    if len(lines) == 0:
+        return result
+    if len(lines[0]) == 0:
+        return result
+
+    headLine = lines[0].split("<|>")
+    del lines[0]
+    headers = []
+    for header in headLine:
+        if len(header) == 0:
+            continue
+        columnInfo = header.split(":")
+        headers.append(columnInfo[1])
+    
+    for line in lines:
+        if len(line) == 0:
+            continue  
+        parameters = line.split("<|>")
+        resultItem = dict()
+        for i in range(len(headers)):
+            resultItem[headers[i]] = parameters[i]
+            
+        result.append(resultItem)
+            
+    return result
+
 def status(eaddr=None):
     """ Permit/Deny status of specified/all addresses. """
 
@@ -108,88 +149,54 @@ def status(eaddr=None):
         result = "permitted" if eaddr in permitted else "denied"
     return json.dumps(permitted)
 
-
-def ws_status(request, args):
-    """ WS interface to status(). """
-    eaddr = args.get("eaddr")
-    print Homework._hwdb.call("SQL:select * from Leases")
-    return status(eaddr)
-
-
 class pollThread(Thread):
     def __init__ (self):
         Thread.__init__(self)
 
-
     def run(self):
-        result = Homework._hwdb.call("SQL:select * from NoxStatus")
-        # Parse responses
-        statuses = parseStatus(result)
-        print result
-        list = []
-        for status in statuses:
-            device = { 'mac': parseMacAddress(command.arguments), 'action': status.state }
-            list.append(devce)
-            
-        Homework._hwdb.postEvent(list)
- 
-        while True:
-            result = Homework._hwdb.call("SQL:select * from NoxCommand")
-            print result
+        try:
+            result = Homework._hwdb.call("SQL:select * from NoxStatus")
             # Parse responses
-            commands = parseCommands(result);
-            for command in commands:
-                # Execute command
-                list = []
-                device = { 'mac': parseMacAddress(command.arguments), 'action': command.command }
-                list.append(devce)
-            
-                Homework._hwdb.postEvent(list)
-               
-                # Insert result
-                result = Homework._hwdb.call("SQL:insert into NoxResponse values (\"%s\", true, \"\")"%(command.command_id))
-                print result
-                result = Homework._hwdb.call("SQL:insert into NoxStatus values (\"%s\", \"%s\", \"%s\")"%(command.arguments, command.command, command.source))
-                print result               
-               
-            time.sleep(1)
+            statuses = parseResult(result)
+            devices = []
+            last = None
+            for status in statuses:
+                device = { 'mac': parseMacAddress(status['arguments']), 'action': status['state'] }
+                devices.append(device)
+                last = status['timestamp']
+                
+            if len(devices) > 0:
+                print "Posting changes:", devices
+                Homework._hwdb.postEvent(devices)
+     
+            while True:
+                try:
+                    query = "SQL:select * from NoxCommand"
+                    if last:
+                        query = "SQL:select * from NoxCommand [ since %s ]"%last
+                    result = Homework._hwdb.call(query)
+                    # Parse responses
+                    commands = parseResult(result);
+                    for command in commands:
+                        # Execute command
+                        devices = []
+                        device = { 'mac': parseMacAddress(command['arguments']), 'action': command['command'] }
+                        devices.append(device)
 
-    def parseMacAddress(self, str):
-        if str.startswith('ETH|'):
-            parts = str.split('|')
-            return util.convert_to_eaddr(parts[1])
-        elif str.startswith('IP|'):
-            parts = str.split('|')
+                        Homework._hwdb.postEvent(devices)
+                        last = command['timestamp']
 
-    def parseCommands(self, str):
-        result = []
-        lines = str.split("\n")
-        for line in lines:
-            parameters = line.split("<|>")
-            command = { 'time': parameters[0], 'command_id': parameters[1], 'command': parameters[2], 'arguments': parameters[3], 'source': parameters[4]}
-            result.append(command);
-            
-        return result;
+                        # Insert result
+                        result = Homework._hwdb.call("SQL:insert into NoxResponse values (\"%s\", 1, \"\")"%(command['commandid']))
+                        print result
+                        result = Homework._hwdb.call("SQL:insert into NoxStatus values (\"%s\", \"%s\", \"%s\")"%(command['arguments'], command['command'], command['source']))
+                        print result
 
-    def parseStatus(self, str):
-        result = []
-        lines = str.split("\n")
-        for line in lines:
-            parameters = line.split("<|>")
-            status = { 'time': parameters[0], 'device': parameters[1], 'state': parameters[2], 'source': parameters[3]}
-            result.append(status);
-            
-        return result;
-            
-    def parseResponses(self, str):
-        result = []
-        lines = str.split("\n")
-        for line in lines:
-            parameters = line.split("<|>")
-            response = { 'time': parameters[0], 'command_id': parameters[1], 'success': parameters[2], 'message': parameters[3]}
-            result.append(response);
-            
-        return result;
+                    time.sleep(1)
+                except:
+                    traceback.print_exc(file=sys.stdout)
+        except:
+            traceback.print_exc(file=sys.stdout)
         
 ##
 ## main

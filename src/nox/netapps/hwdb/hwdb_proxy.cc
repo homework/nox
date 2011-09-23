@@ -63,7 +63,12 @@ namespace vigil {
 				PyObject* macObj = PyDict_GetItemString(object, "mac");
 				PyObject* actObj = PyDict_GetItemString(object, "action");
 
-		        mylist.push_back(*(new HWDBDevice(PyString_AsString(macObj), PyString_AsString(actObj))));
+				char * macStr = PyString_AsString(macObj);
+				char * actStr = PyString_AsString(actObj);
+
+		        lg.info("%s %s", actStr, macStr);
+
+		        mylist.push_back(*(new HWDBDevice(macStr, actStr)));
 			}
 
 	        ctrl->post(new HWDBEvent(mylist)); /* HWDBEvent creates a deep copy */
