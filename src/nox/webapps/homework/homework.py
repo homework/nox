@@ -76,28 +76,6 @@ def datapath_leave(dpid):
 ##
 ## webservice entry points
 ##
-    
-def permit(eaddr, ipaddr=None):
-    """ Permit tx/rx to/from a specified Ethernet address."""
-    
-    print "PERMIT", eaddr, ipaddr
-    if not (eaddr or ipaddr): return
-    
-    eaddr = util.convert_to_eaddr(eaddr)
-    Homework.st['permitted'][eaddr] = True
-    Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"permit\")"%(eaddr))
-    return status()
-
-def deny(eaddr, ipaddr = None):
-    """ Deny tx/rx to/from a specified Ethernet address. """
-    print "DENY", eaddr, ipaddr
-    if not (eaddr or ipaddr): return
-    eaddr = util.convert_to_eaddr(eaddr)
-    del Homework.st['permitted'][eaddr]
-    Homework._hwdb.insert("SQL:insert into Devices values (\"%s\", \"deny\")"%(eaddr))
-    #data = Homework._dhcp.revoke_mac_addr(eaddr)
-    return status()
-
 def parseMacAddress(str):
     if str.startswith('ETH|'):
         parts = str.split('|')
@@ -149,54 +127,51 @@ def status(eaddr=None):
         result = "permitted" if eaddr in permitted else "denied"
     return json.dumps(permitted)
 
-class pollThread(Thread):
-    def __init__ (self):
-        Thread.__init__(self)
-
-    def run(self):
-        try:
-            result = Homework._hwdb.call("SQL:select * from NoxStatus")
-            # Parse responses
-            statuses = parseResult(result)
+def timer():
+    try:
+        query = "SQL:SELECT * from NoxCommand"
+        if Homework.last:
+            query = "SQL:SELECT * from NoxCommand [ since {} ]".format(Homework.last)
+        result = Homework._hwdb.call(query)
+        # Parse responses
+        commands = parseResult(result);
+        for command in commands:
+            # Execute command
             devices = []
-            last = None
-            for status in statuses:
-                device = { 'mac': parseMacAddress(status['arguments']), 'action': status['state'] }
-                devices.append(device)
-                last = status['timestamp']
+            device = { 'mac': parseMacAddress(command['arguments']), 'action': command['command'] }
+            devices.append(device)
+
+            Homework._hwdb.postEvent(devices)
+            Homework.last = command['timestamp']
+
+            # Insert result
+            result = Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '1', \"Success\")".format(command['commandid']))
+            print result
+            result = Homework._hwdb.call("SQL:INSERT into NoxStatus values (\"{}\", \"{}\", \"{}\")".format(command['arguments'], command['command'], command['source']))
+            print result
+
+    except:
+        traceback.print_exc(file=sys.stdout)
+    
+    Homework.post_callback(1, timer)        
+    
+
+def setup():
+    try:
+        result = Homework._hwdb.call("SQL:select * from NoxStatus")
+        # Parse responses
+        statuses = parseResult(result)
+        devices = []
+        for status in statuses:
+            device = { 'mac': parseMacAddress(status['arguments']), 'action': status['state'] }
+            devices.append(device)
+            Homework.last = status['timestamp']
                 
             if len(devices) > 0:
                 print "Posting changes:", devices
                 Homework._hwdb.postEvent(devices)
-     
-            while True:
-                try:
-                    query = "SQL:select * from NoxCommand"
-                    if last:
-                        query = "SQL:select * from NoxCommand [ since %s ]"%last
-                    result = Homework._hwdb.call(query)
-                    # Parse responses
-                    commands = parseResult(result);
-                    for command in commands:
-                        # Execute command
-                        devices = []
-                        device = { 'mac': parseMacAddress(command['arguments']), 'action': command['command'] }
-                        devices.append(device)
-
-                        Homework._hwdb.postEvent(devices)
-                        last = command['timestamp']
-
-                        # Insert result
-                        result = Homework._hwdb.call("SQL:insert into NoxResponse values (\"%s\", 1, \"\")"%(command['commandid']))
-                        print result
-                        result = Homework._hwdb.call("SQL:insert into NoxStatus values (\"%s\", \"%s\", \"%s\")"%(command['arguments'], command['command'], command['source']))
-                        print result
-
-                    time.sleep(1)
-                except:
-                    traceback.print_exc(file=sys.stdout)
-        except:
-            traceback.print_exc(file=sys.stdout)
+    except:
+        traceback.print_exc(file=sys.stdout)
         
 ##
 ## main
@@ -209,6 +184,7 @@ class homework(core.Component):
         core.Component.__init__(self, ctxt)
         global Homework
         Homework = self
+        Homework.last = None        
         Homework.st = { 'permitted': {}, ## eaddr -> None ## [ipaddr, ...]
                         'ports': {},     ## dpid -> attrs
                         }
@@ -233,8 +209,9 @@ class homework(core.Component):
         self._hwdb = self.resolve(pyhwdb)
         # print "hwdb obj " + str(self._hwdb)
 
-        pt = pollThread()
-        pt.start()
+        setup()
+        
+        self.post_callback(1, timer)
         
     def getInterface(self): return str(homework)
 
