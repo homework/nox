@@ -1,16 +1,15 @@
 include ../Make.vars
 
 dist_bin_SCRIPTS = \
-	gen-nox-cert.sh 
+	gen-nox-cert.sh
+
 bin_SCRIPTS = \
-	gen-nox-cert.sh 
+	gen-nox-cert.sh
+
 data_DATA = \
 	noxca.cnf
 
 pkgsysconf_DATA = \
-	noxca.key \
-	noxca.crt \
-	ca.pem \
 	nox.json
 
 EXTRA_DIST = \
@@ -25,7 +24,7 @@ noxca.key noxca.crt ca.pem:
 	@echo ""
 	@echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
 
-all-local: noxca.key noxca.crt ca.pem
+all-local: # noxca.key noxca.crt ca.pem
 	@dlist="$(pkgsysconf_DATA)";for f in $$dlist; do \
 	  if test ! -f $$f; then \
 		ln -sf $(srcdir)/$$f $(builddir)/$$f;\
