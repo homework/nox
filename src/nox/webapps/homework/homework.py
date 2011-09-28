@@ -105,17 +105,20 @@ def timer():
             # Execute command
 
             mac = getMacAddress(command['arguments'])
-            device = { 'mac': mac, 'action': command['command'] }
-            devices = [ device ]
+            if is_valid_eth(mac):
+                device = { 'mac': mac, 'action': command['command'] }
+                devices = [ device ]
 
-            Homework._hwdb.postEvent(devices)
-            Homework.last = command['timestamp']
+                Homework._hwdb.postEvent(devices)
+                Homework.last = command['timestamp']
 
-            # Insert result
-            result = Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '1', \"Success\")".format(command['commandid']))
-            print result
-            result = Homework._hwdb.call("SQL:INSERT into NoxStatus values (\"{}\", \"{}\", \"{}\") on duplicate key update".format(mac, command['command'], command['source']))
-            print result
+                # Insert result
+                Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '1', \"Success\")".format(command['commandid']))
+                Homework._hwdb.call("SQL:INSERT into NoxStatus values (\"{}\", \"{}\", \"{}\") on duplicate key update".format(mac, command['command'], command['source']))
+            elif not mac:
+                Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '0', \"Could not find MAC Address for {}\")".format(command['commandid'], command['arguments']))
+            else:
+                Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '0', \"{} not recognized as a MAC Address\")".format(command['commandid'], mac))
 
     except:
         traceback.print_exc(file = sys.stdout)
