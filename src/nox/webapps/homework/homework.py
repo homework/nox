@@ -70,6 +70,8 @@ def getMacAddress(str):
         if len(leases) == 0:
             return None
         return leases[len(leases) - 1]['macaddr']
+    else:
+        return str
 
 def parseResult(str):
     result = []
