@@ -39,9 +39,7 @@ def is_valid_ip(ip):
 
 def is_valid_eth(eth):
     """ Test if string is valid representation of Ethernet address. """
-    if ":" in eth: bytes = eth.split(":")
-    elif "-" in eth: bytes = eth.split("-")
-    else: return False ## else: bytes = [ eth[i:i+2] for i in range(0,len(eth),2) ]
+    bytes = eth.split(":")
 
     if len(bytes) != 6: return False
 
@@ -50,9 +48,12 @@ def is_valid_eth(eth):
     except ValueError: return False
 
 def formatMacAddress(mac):
-    if ":" not in mac:
-        return mac[0:2] + ":" + mac[2:4] + ":" + mac[4:6] + ":" + mac[6:8] + ":" + mac[8:10] + ":" + mac[10:12]
-    return mac
+    if "-" in mac:
+        return mac.replace("-", ":")
+    if ":" in mac:
+        return mac
+
+    return mac[0:2] + ":" + mac[2:4] + ":" + mac[4:6] + ":" + mac[6:8] + ":" + mac[8:10] + ":" + mac[10:12]
 
 def getMacAddress(str):
     if str.startswith('ETH|'):
@@ -62,6 +63,13 @@ def getMacAddress(str):
     elif str.startswith('IP|'):
         parts = str.split('|')
         ip = parts[1]
+        if not is_valid_ip(ip):
+            return None
+        result = Homework._hwdb.call("SQL:SELECT * from Leases WHERE ipaddr = '{}'".format(ip))
+        leases = parseResult(result)
+        if len(leases) == 0:
+            return None
+        return leases[len(leases) - 1]['macaddr']
 
 def parseResult(str):
     result = []
