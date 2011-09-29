@@ -31,9 +31,9 @@ const char *dhcp_msg_type_name[] = {NULL, "DHCPDiscover", "DHCPOffer",
 #define ROUTABLE_SUBNET "10.2.0.0"
 #define ROUTABLE_NETMASK 16
 
-#define NET_TO_ROUTER(n)    (htonl(((uint32_t)(_n))+1))
-#define NET_TO_HOST(n)      (htonl(((uint32_t)(_n))+2))
-#define NET_TO_BROADCAST(n) (htonl(((uint32_t)(_n))+3))
+#define NET_TO_ROUTER(n)    (htonl(((uint32_t)(n))+1))
+#define NET_TO_HOST(n)      (htonl(((uint32_t)(n))+2))
+#define NET_TO_BROADCAST(n) (htonl(((uint32_t)(n))+3))
 
 namespace vigil
 {
@@ -167,13 +167,13 @@ namespace vigil
         unsigned int bytes = 0;
         memset(q, 0, SOCK_RECV_BUF_LEN);
         bytes += sprintf(q + bytes, "SQL:insert into Leases values (" );
-        /* action */
-        bytes += sprintf(q + bytes, "\"%s\", ", mac);
         /* mac address */
-        bytes += sprintf(q + bytes, "\"%s\", ", ip);
+        bytes += sprintf(q + bytes, "\"%s\", ", mac);
         /* ip address */
+        bytes += sprintf(q + bytes, "\"%s\", ", ip);
+        /* hostname */
         bytes += sprintf(q + bytes, "\"%s\", ", hostname);
-        /* hostname (optional) */
+        /* action */
         bytes += sprintf(q + bytes, "\"%s\")\n",action);
 
         this->hwdb->insert(q);
