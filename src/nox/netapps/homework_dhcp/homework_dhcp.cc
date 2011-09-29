@@ -359,7 +359,7 @@ namespace vigil
         return STOP;
     }
 
-    uint32_t homework_dhcp::find_free_net(const ipaddr& subnet, int netmask) {
+    uint32_t homework_dhcp::find_free_ip(const ipaddr& subnet, int netmask) {
         map<struct ipaddr, struct dhcp_mapping *>::iterator it;
         timeval tv; 
         uint32_t inc = 4;
