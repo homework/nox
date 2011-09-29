@@ -168,7 +168,7 @@ namespace vigil
             std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;
             std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
 
-            uint32_t find_free_ip(const ipaddr& subnet, int netmask);
+            uint32_t find_free_net(const ipaddr& subnet, int netmask);
             //netmasks
             cidr_ipaddr routable;
 
