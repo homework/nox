@@ -148,7 +148,7 @@ namespace vigil
         private:
             bool send_flow_modification (Flow fl, uint32_t wildcard, datapathid datapath_id,
                     uint32_t buffer_id, uint16_t command,
-                    uint16_t idle_timeout,
+                    uint16_t idle_timeout, uint16_t prio,
                     std::vector<boost::shared_array<char> > act);
 
             //datapath storage
@@ -168,7 +168,7 @@ namespace vigil
             std::map<struct ethernetaddr, struct dhcp_mapping *> mac_mapping;
             std::map<struct ipaddr, struct dhcp_mapping *> ip_mapping;
 
-            uint32_t find_free_net(const ipaddr& subnet, int netmask);
+            uint32_t find_free_ip(const ipaddr& subnet, int netmask);
             //netmasks
             cidr_ipaddr routable;
 
