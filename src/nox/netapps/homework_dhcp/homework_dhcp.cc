@@ -313,7 +313,7 @@ namespace vigil
         }
 
         //choose the ip we will send to a specific host. 
-        ipaddr net = this->select_net(
+        ipaddr net = this->select_ip(
             ethernetaddr(hdr.ether->ether_shost), dhcp_msg_type, ntohl(requested_ip));
 
         if (dhcp_msg_type == DHCPRELEASE) 
