@@ -168,13 +168,13 @@ namespace vigil
         memset(q, 0, SOCK_RECV_BUF_LEN);
         bytes += sprintf(q + bytes, "SQL:insert into Leases values (" );
         /* action */
-        bytes += sprintf(q + bytes, "\"%s\", ", action);
-        /* mac address */
         bytes += sprintf(q + bytes, "\"%s\", ", mac);
-        /* ip address */
+        /* mac address */
         bytes += sprintf(q + bytes, "\"%s\", ", ip);
+        /* ip address */
+        bytes += sprintf(q + bytes, "\"%s\", ", hostname);
         /* hostname (optional) */
-        bytes += sprintf(q + bytes, "\"%s\")\n",hostname);
+        bytes += sprintf(q + bytes, "\"%s\")\n",action);
 
         this->hwdb->insert(q);
     }
