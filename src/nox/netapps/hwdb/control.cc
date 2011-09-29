@@ -283,10 +283,10 @@ void HWDBControl::restart(void) {
                 /* First column is the timestamp. */
                 last = string_to_timestamp(column[0]);
                 Lease *lease = new Lease(last,
-                        column[1], /* st */
-                        column[2], /* mc */
-                        column[3], /* ip */
-                        column[4]  /* hn */
+                        column[4], /* st */
+                        column[1], /* mc */
+                        column[2], /* ip */
+                        column[3]  /* hn */
                         );
                 lg.info("Lease is %s\n", lease->string().c_str());
                 delete lease;
