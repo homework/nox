@@ -39,6 +39,7 @@ def is_valid_ip(ip):
 
 def is_valid_eth(eth):
     """ Test if string is valid representation of Ethernet address. """
+    if not eth: return False
     bytes = eth.split(":")
 
     if len(bytes) != 6: return False
@@ -65,11 +66,13 @@ def getMacAddress(str):
         ip = parts[1]
         if not is_valid_ip(ip):
             return None
-        result = Homework._hwdb.call("SQL:SELECT * from Leases WHERE ipaddr = '{}'".format(ip))
+        result = Homework._hwdb.call("SQL:SELECT * from Leases WHERE ipaddr = \"{}\"".format(ip))
         leases = parseResult(result)
         if len(leases) == 0:
             return None
         return leases[len(leases) - 1]['macaddr']
+    else:
+        return str
 
 def parseResult(str):
     result = []
@@ -113,12 +116,12 @@ def timer():
             # Execute command
 
             mac = getMacAddress(command['arguments'])
+            Homework.last = command['timestamp']
             if is_valid_eth(mac):
                 device = { 'mac': mac, 'action': command['command'] }
                 devices = [ device ]
 
                 Homework._hwdb.postEvent(devices)
-                Homework.last = command['timestamp']
 
                 # Insert result
                 Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '1', \"Success\")".format(command['commandid']))
