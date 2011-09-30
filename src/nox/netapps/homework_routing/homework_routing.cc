@@ -50,13 +50,13 @@ namespace vigil
     {
         lg.dbg(" Configure called ");
         this->routable = cidr_ipaddr(ipaddr(ROUTABLE_SUBNET), 
-                ROUTABLE_NETMASK);
+                                     ROUTABLE_NETMASK);
         this->non_routable = cidr_ipaddr(ipaddr(NON_ROUTABLE_SUBNET), 
-                NON_ROUTABLE_NETMASK);
+                                         NON_ROUTABLE_NETMASK);
         this->init_subnet = cidr_ipaddr(ipaddr(INIT_SUBNET), 
-                INIT_NETMASK); 
+                                        INIT_NETMASK); 
         this->multicast = cidr_ipaddr(ipaddr(MULTICAST_SUBNET), 
-                MULTICAST_NETMASK); 
+                                      MULTICAST_NETMASK); 
     }
 
     void homework_routing::install()
@@ -75,13 +75,13 @@ namespace vigil
         service = "HWDB";
 
         register_handler<Packet_in_event>(boost::bind(&homework_routing::mac_pkt_handler, 
-                    this, _1));
+                                                      this, _1));
         register_handler<Datapath_join_event>(boost::bind(&homework_routing::datapath_join_handler, 
-                    this, _1));
+                                                          this, _1));
         register_handler<Datapath_leave_event>(boost::bind(&homework_routing::datapath_leave_handler, 
-                    this, _1));
+                                                           this, _1));
         register_handler<HWDBEvent>(boost::bind(&homework_routing::device_handler, 
-                    this, _1));
+                                                this, _1));
 
         s = socket(AF_INET, SOCK_DGRAM, 0);
         if (s==-1) {
@@ -110,7 +110,7 @@ namespace vigil
         const HWDBEvent& event = assert_cast<const HWDBEvent&>(e);
 
         for (list<HWDBDevice>::const_iterator i = event.devices.begin();
-                i != event.devices.end(); i++) {
+             i != event.devices.end(); i++) {
 
             HWDBDevice d = *i;
             lg.info("%s\t%s\n", d.mac, d.action);
@@ -123,6 +123,7 @@ namespace vigil
                 this->whitelist_mac(ethernetaddr(string(d.mac)));
             }
         }
+        return CONTINUE;
 
     }
     /////////////////////////////////////
@@ -151,7 +152,7 @@ namespace vigil
         flow.nw_proto = ip_::proto::IGMP;
         wildcard = ~(OFPFW_DL_TYPE | OFPFW_NW_PROTO);   
         this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                -1, OFPFC_ADD,OFP_FLOW_PERMANENT, act);
+                                      -1, OFPFC_ADD,OFP_FLOW_PERMANENT, OFP_DEFAULT_PRIORITY, act);
         return CONTINUE;
     }
 
@@ -170,7 +171,7 @@ namespace vigil
     }
 
     void homework_routing::getInstance(const Context* c,
-            homework_routing*& component)
+                                       homework_routing*& component)
     {
         component = dynamic_cast<homework_routing*>
             (c->get_by_interface(container::Interface_description
@@ -198,18 +199,19 @@ namespace vigil
 
         ofp_act_out->type = htons(OFPAT_OUTPUT);
         ofp_act_out->len = htons(sizeof(struct ofp_action_output));
-        ofp_act_out->port = htons((flow.dl_src != this-> bridge_mac)?OFPP_LOCAL:1); 
+        /* XXX arp responses will be sent to every outgoing port */
+        ofp_act_out->port = htons((flow.dl_src != this-> bridge_mac)?OFPP_LOCAL:OFPP_FLOOD);
         ofp_act_out->max_len = htons(2000);
 
         this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                pi.buffer_id, OFPFC_ADD, OFP_FLOW_PERMANENT, act);
+                                      pi.buffer_id, OFPFC_ADD, OFP_FLOW_PERMANENT, OFP_DEFAULT_PRIORITY, act);
         return STOP;
     }
 
     Disposition homework_routing::mac_pkt_handler(const Event& e) {
         //printf("ethernet packet handled\n");
         std::vector<boost::shared_array<char> > act;
-        struct ofp_action_output *ofp_act_out;
+        struct ofp_action_output *ofp_act_out, *ofp_act_out2;
         const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
         Flow flow(pi.in_port, *(pi.get_buffer()));
         //printf("pkt_in packet: %s\n", flow.to_string().c_str()); 
@@ -225,11 +227,11 @@ namespace vigil
         } else if(flow.dl_type ==  ethernet::IP) {
             //add an exception in the case of dhcp. 
             if( (flow.nw_proto == ip_::proto::UDP) && 
-                    (flow.tp_src == htons(68)) && 
-                    (flow.tp_dst ==  htons(67))) {
+                (flow.tp_src == htons(68)) && 
+                (flow.tp_dst ==  htons(67))) {
                 return CONTINUE;
             } else if( (flow.nw_proto == ip_::proto::IGMP) && 
-                    (flow.nw_dst == inet_addr("224.0.0.22"))) {
+                       (flow.nw_dst == inet_addr("224.0.0.22"))) {
                 this->igmp_handler(e);
                 return STOP;
             } else {
@@ -252,57 +254,95 @@ namespace vigil
             ofp_act_out=(struct ofp_action_output *)ofp_out.get();
             ofp_act_out->type = htons(OFPAT_OUTPUT);
             ofp_act_out->len = htons(sizeof(struct ofp_action_output));
-            ofp_act_out->port = htons(((flow.in_port == 1)?OFPP_IN_PORT:1)); 
+            ofp_act_out->port = htons(OFPP_FLOOD);
             ofp_act_out->max_len = htons(2000);
-            uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_VLAN | OFPFW_DL_SRC | 
-                    OFPFW_DL_DST | OFPFW_DL_TYPE);
-            this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                    pi.buffer_id, OFPFC_ADD, 30, act);
-        } else if(flow.dl_dst == this->bridge_mac) {
-            boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
-            act.push_back(ofp_out);
-            ofp_act_out=(struct ofp_action_output *)ofp_out.get();
-            ofp_act_out->type = htons(OFPAT_OUTPUT);
-            ofp_act_out->len = htons(sizeof(struct ofp_action_output));
-            ofp_act_out->port = htons(OFPP_LOCAL); 
-            ofp_act_out->max_len = htons(2000);
-            uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_VLAN | OFPFW_DL_SRC | 
-                    OFPFW_DL_DST | OFPFW_DL_TYPE);
-            this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                    pi.buffer_id, OFPFC_ADD, 30, act);
-        } 
 
-        if(flow.dl_dst == ethernetaddr(ethbroadcast)) {
+            if((0 < flow.in_port) && (flow.in_port < OFPP_MAX)) 
+            {   /*  physical IN_PORT => FLOOD will *not* cover IN_PORT */
+                ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
+                ofp_act_out = (struct ofp_action_output *)ofp_out.get();
+                memcpy(ofp_act_out, act[0].get(), sizeof(struct ofp_action_output));
+                act.push_back(ofp_out);
+                ofp_act_out->port = htons(OFPP_IN_PORT);
+            }
+#if 0
+            /*
+             * Need two rules here. One for IN_PORT; one for FLOOD
+             * ofp_act_out->port = htons(((flow.in_port == 1)?OFPP_IN_PORT:1));
+             */ 
             boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
             act.push_back(ofp_out);
-            ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+            ofp_act_out = (struct ofp_action_output *)ofp_out.get();
             ofp_act_out->type = htons(OFPAT_OUTPUT);
             ofp_act_out->len = htons(sizeof(struct ofp_action_output));
-            ofp_act_out->port = htons(OFPP_IN_PORT); 
+            ofp_act_out->port = OFPP_FLOOD; /* htons(((flow.in_port == 1)?OFPP_IN_PORT:1)); */
             ofp_act_out->max_len = htons(2000);
-            ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
-            ofp_act_out=(struct ofp_action_output *)ofp_out.get();
-            memcpy(ofp_act_out, act[0].get(), sizeof(struct ofp_action_output));
-            act.push_back(ofp_out);
-            ofp_act_out->port = htons(OFPP_ALL); 
-            uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_SRC | OFPFW_DL_DST);
-            this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                    pi.buffer_id, OFPFC_ADD, 30, act);
-        } else {
-            lg.info("blocked mac pkt %s->%s", flow.dl_src.string().c_str(),
-                    flow.dl_dst.string().c_str());
+
+            if((0 < flow.in_port) && (flow.in_port  0) /* IN_PORT != controller => FLOOD will *not* cover IN_PORT */
+                {
+                    boost::shared_array<char> ofp_out2(new char[sizeof(struct ofp_action_output)]);
+                    act.push_back(ofp_out2);
+                    ofp_act_out2 = (struct ofp_action_output*)ofp_out2.get();
+                    ofp_act_out2->type = htons(OFPAT_OUTPUT);
+                    ofp_act_out2->len = htons(sizeof(struct ofp_action_output));
+                    ofp_act_out2->port = OFPP_IN_PORT;
+                    ofp_act_out2->max_len = htons(2000);
+                }
+
+#endif
+
+                uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_VLAN | OFPFW_DL_SRC | 
+                                       OFPFW_DL_DST | OFPFW_DL_TYPE);
+                this->send_flow_modification (flow, wildcard, pi.datapath_id,
+                                              pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
+
+                } else if(flow.dl_dst == this->bridge_mac) {
+                    boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
+                    act.push_back(ofp_out);
+                    ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+                    ofp_act_out->type = htons(OFPAT_OUTPUT);
+                    ofp_act_out->len = htons(sizeof(struct ofp_action_output));
+                    ofp_act_out->port = htons(OFPP_LOCAL); 
+                    ofp_act_out->max_len = htons(2000);
+                    uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_VLAN | OFPFW_DL_SRC | 
+                                           OFPFW_DL_DST | OFPFW_DL_TYPE);
+                    this->send_flow_modification (flow, wildcard, pi.datapath_id,
+                                                  pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
+                } 
+
+            if(flow.dl_dst == ethernetaddr(ethbroadcast)) {
+                boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
+                act.push_back(ofp_out);
+                ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+                ofp_act_out->type = htons(OFPAT_OUTPUT);
+                ofp_act_out->len = htons(sizeof(struct ofp_action_output));
+                ofp_act_out->port = htons(OFPP_IN_PORT);
+                ofp_act_out->max_len = htons(2000);
+
+                ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
+                ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+                memcpy(ofp_act_out, act[0].get(), sizeof(struct ofp_action_output));
+                act.push_back(ofp_out);
+                ofp_act_out->port = htons(OFPP_ALL); 
+
+                uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_SRC | OFPFW_DL_DST);
+                this->send_flow_modification (flow, wildcard, pi.datapath_id,
+                                              pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
+            } else {
+                lg.info("blocked mac pkt %s->%s", flow.dl_src.string().c_str(),
+                        flow.dl_dst.string().c_str());
+            }
+            return STOP;
         }
-        return STOP;
-    }
 
-    bool 
-        homework_routing::check_access(const ethernetaddr& ether) {
+        bool 
+            homework_routing::check_access(const ethernetaddr& ether) {
             return (this->mac_permit.find(ether) != this->mac_permit.end());
             //return this->p_dhcp_proxy->is_ether_addr_routable(ether);
         }
 
-    Disposition 
-        homework_routing::igmp_handler(const Event& e) {
+        Disposition 
+            homework_routing::igmp_handler(const Event& e) {
             const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
             Flow flow(pi.in_port, *(pi.get_buffer()));
             int i;
@@ -330,13 +370,13 @@ namespace vigil
                 ipaddr addr = ipaddr(ntohl(report->grec[i].grec_mca));
 
                 if( (report->grec[i].grec_type == IGMPV3_CHANGE_TO_EXCLUDE) ||
-                        (report->grec[i].grec_type == IGMPV3_MODE_IS_INCLUDE)) {
+                    (report->grec[i].grec_type == IGMPV3_MODE_IS_INCLUDE)) {
                     printf("joining multicast ip addr %s \n", addr.string().c_str());
                     if(this->multicast_ip.find(addr) == this->multicast_ip.end()) 
                         this->multicast_ip[addr] = std::set<ipaddr>();
                     this->multicast_ip[addr].insert(ipaddr(ntohl(flow.nw_src)));
                 } else if( (report->grec[i].grec_type == IGMPV3_CHANGE_TO_INCLUDE) ||
-                        (report->grec[i].grec_type == IGMPV3_MODE_IS_EXCLUDE)) {
+                           (report->grec[i].grec_type == IGMPV3_MODE_IS_EXCLUDE)) {
                     printf("removing multicast ip addr %s \n", addr.string().c_str());
                     if(this->multicast_ip.find(addr) != this->multicast_ip.end()) {
                         this->multicast_ip[addr].erase(src_addr);
@@ -348,43 +388,43 @@ namespace vigil
             return STOP;
         }
 
-    Disposition homework_routing::pae_handler(const Event& e) {
-        // chrck for better handling ioctrl and SIOCSARP
-        // it will allow to insert mac entries programmatically
-        // so that you can always control what is going on in the net.
-        const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
-        Flow flow(pi.in_port, *(pi.get_buffer()));
-        lg.info("pae received: %s(type:%x, proto:%x)", pi.get_name().c_str(), 
-                flow.dl_type , flow.nw_proto);
+        Disposition homework_routing::pae_handler(const Event& e) {
+            // chrck for better handling ioctrl and SIOCSARP
+            // it will allow to insert mac entries programmatically
+            // so that you can always control what is going on in the net.
+            const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
+            Flow flow(pi.in_port, *(pi.get_buffer()));
+            lg.info("pae received: %s(type:%x, proto:%x)", pi.get_name().c_str(), 
+                    flow.dl_type , flow.nw_proto);
 
-        //this should check the mac vector
-        if(this->mac_blacklist.find(flow.dl_src) != this->mac_blacklist.end() ) {
-            lg.info("Skipping pae packet from blacklisted mac %s", 
-                    flow.dl_src.string().c_str());
+            //this should check the mac vector
+            if(this->mac_blacklist.find(flow.dl_src) != this->mac_blacklist.end() ) {
+                lg.info("Skipping pae packet from blacklisted mac %s", 
+                        flow.dl_src.string().c_str());
+                return STOP;
+            }
+
+            std::vector<boost::shared_array<char> > act;
+            struct ofp_action_output *ofp_act_out;
+            uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_SRC | OFPFW_DL_TYPE);      
+            boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
+            act.push_back(ofp_out);
+
+            ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+
+            ofp_act_out->type = htons(OFPAT_OUTPUT);
+            ofp_act_out->len = htons(sizeof(struct ofp_action_output));
+            ofp_act_out->port = htons(OFPP_LOCAL); 
+            ofp_act_out->max_len = htons(2000);
+
+            this->send_flow_modification (flow, wildcard, pi.datapath_id, pi.buffer_id, 
+                                          OFPFC_ADD,OFP_FLOW_PERMANENT, OFP_DEFAULT_PRIORITY, act);
+
             return STOP;
         }
 
-        std::vector<boost::shared_array<char> > act;
-        struct ofp_action_output *ofp_act_out;
-        uint32_t wildcard = ~( OFPFW_IN_PORT | OFPFW_DL_SRC | OFPFW_DL_TYPE);      
-        boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
-        act.push_back(ofp_out);
-
-        ofp_act_out=(struct ofp_action_output *)ofp_out.get();
-
-        ofp_act_out->type = htons(OFPAT_OUTPUT);
-        ofp_act_out->len = htons(sizeof(struct ofp_action_output));
-        ofp_act_out->port = htons(OFPP_LOCAL); 
-        ofp_act_out->max_len = htons(2000);
-
-        this->send_flow_modification (flow, wildcard, pi.datapath_id, pi.buffer_id, 
-                OFPFC_ADD,OFP_FLOW_PERMANENT, act);
-
-        return STOP;
-    }
-
-    Disposition 
-        homework_routing::packet_in_handler(const Event& e) {
+        Disposition 
+            homework_routing::packet_in_handler(const Event& e) {
             const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
             Flow flow(pi.in_port, *(pi.get_buffer()));
             ethernetaddr dl_dst;
@@ -410,7 +450,7 @@ namespace vigil
 
             //check if src ip is routable and the src mac address is permitted.
             if( (flow.dl_src != this->bridge_mac) && 
-                    (!this->check_access(flow.dl_src)) ) {
+                (!this->check_access(flow.dl_src)) ) {
                 lg.info("MAC address %s is not permitted to send data", flow.dl_src.string().c_str());
                 return STOP;
             } 
@@ -423,12 +463,12 @@ namespace vigil
 
             // find state for source - in case the address comes 
             // from the server ignore state rquirement. 
-            is_src_local = this->routable.matches(ipaddr(ntohl(flow.nw_src))) || 
-                this->init_subnet.matches(ipaddr(ntohl(flow.nw_src)));
+            is_src_local = (this->routable.matches(ipaddr(ntohl(flow.nw_src)))
+                            || this->init_subnet.matches(ipaddr(ntohl(flow.nw_src))));
 
             if((is_src_local) && (ntohl(flow.nw_src)&0x3) == 1) {
                 if ( (!this->p_dhcp->is_valid_mapping(ipaddr(ntohl(flow.nw_src)), flow.dl_src)) &&
-                        (flow.dl_src != this->bridge_mac)) {
+                     (flow.dl_src != this->bridge_mac)) {
                     lg.info("received packet from unrecorded mac. "
                             "i discarding (dl_src:%s bridge_mac:%s)\n", 
                             flow.dl_src.string().c_str(), 
@@ -443,28 +483,35 @@ namespace vigil
                 if(this-> multicast_ip.find(flow.nw_dst) != this-> multicast_ip.end()) {
                     boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
                     act.push_back(ofp_out);
-                    ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+                    ofp_act_out = (struct ofp_action_output *)ofp_out.get();
                     ofp_act_out->type = htons(OFPAT_OUTPUT);
                     ofp_act_out->len = htons(sizeof(struct ofp_action_output));
-                    ofp_act_out->port = htons(OFPP_IN_PORT); 
+                    ofp_act_out->port = htons(OFPP_IN_PORT);
                     ofp_act_out->max_len = htons(2000);
+
                     ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
-                    ofp_act_out=(struct ofp_action_output *)ofp_out.get();
+                    ofp_act_out = (struct ofp_action_output *)ofp_out.get();
                     memcpy(ofp_act_out, act[0].get(), sizeof(struct ofp_action_output));
                     act.push_back(ofp_out);
-                    ofp_act_out->port = htons(OFPP_ALL); 
+                    ofp_act_out->port = htons(OFPP_FLOOD); 
+
                     uint32_t wildcard = 0;
                     this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                            pi.buffer_id, OFPFC_ADD, 30, act);
+                                                  pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
                     lg.info("Flood multicast packets");
                 }
                 return STOP;
             }
 
-            //check if destination ip is broadcasr and flood network in this case
+            //check if destination ip is broadcast and flood network in this case
             //with a longer broadcast ip
+
+            /* in fact, insert a rule which rewrites the dst_ip to be the 10.2.255.255 broadcast
+             * since 10.2.x.y where y = 0b...11 is too specific a subnet broadcast.  send the
+             * rewritten packet back to the controller (port=0).
+             */
             if(this->routable.matches(ipaddr(ntohl(flow.nw_dst))) && 
-                    ((ntohl(flow.nw_dst) & 0x3) == 0x3)) {
+               ((ntohl(flow.nw_dst) & 0x3) == 0x3)) {
                 boost::shared_array<char> ofp_out(new char[sizeof(struct  ofp_action_nw_addr)]);
                 act.push_back(ofp_out);
                 ofp_action_nw_addr *nw_addr=(struct  ofp_action_nw_addr *)ofp_out.get();
@@ -472,18 +519,22 @@ namespace vigil
                 nw_addr->len = htons(sizeof(struct ofp_action_nw_addr ));
                 nw_addr->nw_addr = inet_addr("10.2.255.255"); 
                 //      ofp_act_out->max_len = htons(2000);
+                
                 ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
                 ofp_act_out=(struct ofp_action_output *)ofp_out.get();
                 memcpy(ofp_act_out, act[0].get(), sizeof(struct ofp_action_output));
                 act.push_back(ofp_out);
                 ofp_act_out->port = (flow.in_port == 0)?htons(OFPP_IN_PORT):0; 
                 uint32_t wildcard = 0;
+            
                 this->send_flow_modification(flow, wildcard, pi.datapath_id,
-                        pi.buffer_id, OFPFC_ADD, 30, act);
+                                             pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
                 lg.info("Broadcast packet detected");
                 return STOP;
             }
 
+#if 0
+            /* rather complex, rewrite below */
             //checkin proper output port by checkin the dst mac and ip
             if(this->routable.matches(ipaddr(ntohl(flow.nw_dst))) ) {
                 //destination is local
@@ -500,60 +551,112 @@ namespace vigil
             } else {
                 dst_port = 0;
             }
+#endif
 
-            is_dst_local = this->routable.matches(ipaddr(ntohl(flow.nw_dst))) ||
-                this->init_subnet.matches(ipaddr(ntohl(flow.nw_dst)));
-            if(is_dst_local && is_src_local && (dst_port != 0) && (!is_src_router)) {
+            if((this->routable.matches(ipaddr(ntohl(flow.nw_dst))))
+               && ((ntohl(flow.nw_dst) & 0x01) == 0x01))
+            { /* dst_ip is routable AND is either a host OR a BROADCAST */
+                dst_port = 1;
+            }
+            else
+            {
+                dst_port = 0;
+            }
 
-                ethernetaddr dst_mac =this->p_dhcp->get_mac(ipaddr(ntohl(flow.nw_dst)));
+            int last_act = 0;
+            is_dst_local = (this->routable.matches(ipaddr(ntohl(flow.nw_dst)))
+                            || this->init_subnet.matches(ipaddr(ntohl(flow.nw_dst))));
+            if(is_dst_local && is_src_local && (dst_port != 0) && (!is_src_router)) 
+            {
+                /* The following conditions held, pre-wired-interface:
+                 * - local destination -> dst_ip is routable OR dst_ip is broadcast
+                 * - local source -> src_ip is routable OR src_ip is broadcast (?)
+                 * - dst_ip is routable AND dst_ip is a host on a homework subnet, thus dst_port = 1 (wlan0)
+                 * - source is NOT the router
+                 */
+                ethernetaddr dst_mac = this->p_dhcp->get_mac(ipaddr(ntohl(flow.nw_dst)));
+
                 boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_dl_addr)]);
                 act.push_back(ofp_out);
                 ofp_act_dl_addr = (ofp_action_dl_addr *)ofp_out.get();
                 ofp_act_dl_addr->type = htons(OFPAT_SET_DL_SRC);
                 ofp_act_dl_addr->len = htons(sizeof(ofp_action_dl_addr));
-                memcpy(ofp_act_dl_addr->dl_addr, (const uint8_t *)this->bridge_mac,
-                        sizeof ofp_act_dl_addr->dl_addr);
+                memcpy(ofp_act_dl_addr->dl_addr, (const uint8_t *)this->bridge_mac, sizeof ofp_act_dl_addr->dl_addr);
 
                 ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_dl_addr)]);
                 act.push_back(ofp_out);
                 ofp_act_dl_addr = (ofp_action_dl_addr *)ofp_out.get();
                 ofp_act_dl_addr->type = htons(OFPAT_SET_DL_DST);
                 ofp_act_dl_addr->len = htons(sizeof(ofp_action_dl_addr));
-                memcpy(ofp_act_dl_addr->dl_addr,
-                        (const uint8_t *)dst_mac,
-                        sizeof ofp_act_dl_addr->dl_addr);
+                memcpy(ofp_act_dl_addr->dl_addr, (const uint8_t *)dst_mac, sizeof ofp_act_dl_addr->dl_addr);
 
-                ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_dl_addr)]);
-                act.push_back(ofp_out);
-                ofp_act_out = (ofp_action_output *)ofp_out.get();
-                ofp_act_out->type = htons(OFPAT_OUTPUT);
-                ofp_act_out->len = htons(sizeof(ofp_action_output));
-                ofp_act_out->max_len = htons(2000);
-                ofp_act_out->port = (dst_port==flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port);
+                last_act = 2;
+                /* 
+                   ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_dl_addr)]);
+                   act.push_back(ofp_out);
+                   ofp_act_out = (ofp_action_output *)ofp_out.get();
+                   ofp_act_out->type = htons(OFPAT_OUTPUT);
+                   ofp_act_out->len = htons(sizeof(ofp_action_output));
+                   ofp_act_out->max_len = htons(2000);
+                
+                   ofp_act_out->port = (dst_port==flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port);
+                */
             } else {
-                boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
-                act.push_back(ofp_out);
-                ofp_act_out = (ofp_action_output *)ofp_out.get();
-                ofp_act_out->type = htons(OFPAT_OUTPUT);
-                ofp_act_out->len = htons(sizeof(ofp_action_output));
-                ofp_act_out->max_len = htons(2000);
-                ofp_act_out->port = (dst_port==flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port);
+                /* ANY of these conditions holds:
+                 * - not local destination -> would've been dropped
+                 * - not local source -> would've been dropped
+                 * - dst_ip is not routable (would've been dropped) OR is not a host on a homework subnet
+                 *   ie., dst_port = 0 which will mean controller
+                 * - source is the router -> packet could've come from ISP uplink via NAT
+                 */
+                /* if source is router, dst_port = 0|1 cannot be flow.in_port so will send to 
+                 * dst_port -- which WILL BE 1 = wlan0 if dst_ip (after NAT!) is routable
+                 */
+                /*
+                  boost::shared_array<char> ofp_out(new char[sizeof(struct ofp_action_output)]);
+                  act.push_back(ofp_out);
+                  ofp_act_out = (ofp_action_output *)ofp_out.get();
+                  ofp_act_out->type = htons(OFPAT_OUTPUT);
+                  ofp_act_out->len = htons(sizeof(ofp_action_output));
+                  ofp_act_out->max_len = htons(2000);
+                  ofp_act_out->port = (dst_port==flow.in_port)?htons(OFPP_IN_PORT):htons(dst_port);
+                */
             }
+
+            /* XXX if we've got this far, simply forward packet out of IN_PORT and FLOOD */
+
+            ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
+            act.push_back(ofp_out);
+            ofp_act_out = (ofp_action_output *)ofp_out.get();
+            ofp_act_out->type = htons(OFPAT_OUTPUT);
+            ofp_act_out->len = htons(sizeof(ofp_action_output));
+            ofp_act_out->max_len = htons(2000);
+            ofp_act_out->port = htons(OFPP_FLOOD);
+            
+            if((0 < flow.in_port) && (flow.in_port < OFPP_MAX))
+            {
+                ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
+                ofp_act_out = (struct ofp_action_output *)ofp_out.get();
+                memcpy(ofp_act_out, act[last_act].get(), sizeof(struct ofp_action_output));
+                act.push_back(ofp_out);
+                ofp_act_out->port = htons(OFPP_IN_PORT); 
+            }
+
             this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                    pi.buffer_id, OFPFC_ADD, 30, act);
+                                          pi.buffer_id, OFPFC_ADD, 30, OFP_DEFAULT_PRIORITY, act);
             return STOP;
         }
 
-    //////////////////////////////////
-    //  Homework interaction 
-    /////////////////////////////////
-    std::vector<std::string> 
-        homework_routing::get_dhcp_mapping() { 
+        //////////////////////////////////
+        //  Homework interaction 
+        /////////////////////////////////
+        std::vector<std::string> 
+            homework_routing::get_dhcp_mapping() { 
             return this->p_dhcp->get_dhcp_mapping();
         };
 
-    std::vector<std::string> 
-        homework_routing::get_blacklist_status() {
+        std::vector<std::string> 
+            homework_routing::get_blacklist_status() {
             std::vector<std::string> v;
             std::set<ethernetaddr>::iterator it = this->mac_blacklist.begin();
             for(;it!=this->mac_blacklist.end();it++) {
@@ -563,8 +666,8 @@ namespace vigil
             return v;
         }
 
-    void 
-        homework_routing::whitelist_mac(const ethernetaddr& ether) {
+        void 
+            homework_routing::whitelist_mac(const ethernetaddr& ether) {
             //add element in the vector 
             if(this->mac_blacklist.find(ether) != this->mac_blacklist.end()) 
                 this->mac_blacklist.erase(this->mac_blacklist.find(ether) );
@@ -574,15 +677,15 @@ namespace vigil
             this->revoke_mac_access(ether);
         }
 
-    void 
-        homework_routing::permit_mac(const ethernetaddr& ether) {
+        void 
+            homework_routing::permit_mac(const ethernetaddr& ether) {
             //add element in the vector
             printf("permitting mac %s\n", ether.string().c_str());
             this->mac_permit.insert(ether);
         }
 
-    void 
-        homework_routing::blacklist_mac(const ethernetaddr& ether) {
+        void 
+            homework_routing::blacklist_mac(const ethernetaddr& ether) {
             //add element in the vector 
             this->mac_blacklist.insert(ether); 
             std::vector<datapathid *>::iterator it;
@@ -608,8 +711,8 @@ namespace vigil
             }
         }
 
-    void
-        homework_routing::revoke_mac_access(const ethernetaddr& ether) {
+        void
+            homework_routing::revoke_mac_access(const ethernetaddr& ether) {
             ofp_flow_mod* ofm;
             size_t size = sizeof(ofp_flow_mod);
             vector<datapathid *>::iterator it;
@@ -643,13 +746,13 @@ namespace vigil
             }
         }
 
-    /////////////////////////////////////
-    //   Packet generation methods
-    /////////////////////////////////////
-    bool 
-        homework_routing::send_flow_modification (Flow flow, uint32_t wildcard,  datapathid datapath_id,
-                uint32_t buffer_id, uint16_t command, uint16_t timeout,
-                std::vector<boost::shared_array<char> > act) {
+        /////////////////////////////////////
+        //   Packet generation methods
+        /////////////////////////////////////
+        bool 
+            homework_routing::send_flow_modification (Flow flow, uint32_t wildcard,  datapathid datapath_id,
+                                                      uint32_t buffer_id, uint16_t command, uint16_t timeout, uint16_t prio,
+                                                      std::vector<boost::shared_array<char> > act) {
 
             std::vector< boost::shared_array<char> >::iterator iter;
             ofp_flow_mod* ofm;
@@ -683,7 +786,7 @@ namespace vigil
             ofm->buffer_id = htonl(buffer_id);
             ofm->idle_timeout = htons(timeout);
             ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
-            ofm->priority = htons(OFP_DEFAULT_PRIORITY);
+            ofm->priority = htons(prio); //OFP_DEFAULT_PRIORITY);
             ofm->flags = htons( OFPFF_SEND_FLOW_REM); // | OFPFF_CHECK_OVERLAP);
 
             char *data = (char *)ofm->actions;
@@ -697,42 +800,42 @@ namespace vigil
             return true;
         }
 
-    bool homework_routing::extract_headers(uint8_t *data, uint32_t data_len, 
-            struct nw_hdr *hdr) {
-        uint32_t pointer = 0;
+        bool homework_routing::extract_headers(uint8_t *data, uint32_t data_len, 
+                                               struct nw_hdr *hdr) {
+            uint32_t pointer = 0;
 
-        if(data_len < sizeof( struct ether_header))
-            return false;
+            if(data_len < sizeof( struct ether_header))
+                return false;
 
-        // parse ethernet header
-        hdr->ether = (struct ether_header *) data;
-        pointer += sizeof( struct ether_header);
-        data_len -=  sizeof( struct ether_header);
+            // parse ethernet header
+            hdr->ether = (struct ether_header *) data;
+            pointer += sizeof( struct ether_header);
+            data_len -=  sizeof( struct ether_header);
 
-        // parse ip header
-        if(data_len < sizeof(struct iphdr))
-            return false;
-        hdr->ip = (struct iphdr *) (data + pointer);
-        if(data_len < hdr->ip->ihl*4) 
-            return false;
-        pointer += hdr->ip->ihl*4;
-        data_len -= hdr->ip->ihl*4;
+            // parse ip header
+            if(data_len < sizeof(struct iphdr))
+                return false;
+            hdr->ip = (struct iphdr *) (data + pointer);
+            if(data_len < hdr->ip->ihl*4) 
+                return false;
+            pointer += hdr->ip->ihl*4;
+            data_len -= hdr->ip->ihl*4;
 
-        //parse udp header
-        if(hdr->ip->protocol == ip_::proto::UDP) {
-            hdr->udp = (struct udphdr *)(data + pointer);
-            hdr->data = data + pointer + sizeof(struct udphdr);    
-        } else if(hdr->ip->protocol == ip_::proto::TCP) {
-            hdr->tcp = (struct tcphdr *)(data + pointer);
-            hdr->data = data + pointer + (hdr->tcp->doff*4);
-        } else if(hdr->ip->protocol == ip_::proto::IGMP) {
-            hdr->igmp = (struct igmphdr *)(data + pointer);
-        } else {
-            return false;
+            //parse udp header
+            if(hdr->ip->protocol == ip_::proto::UDP) {
+                hdr->udp = (struct udphdr *)(data + pointer);
+                hdr->data = data + pointer + sizeof(struct udphdr);    
+            } else if(hdr->ip->protocol == ip_::proto::TCP) {
+                hdr->tcp = (struct tcphdr *)(data + pointer);
+                hdr->data = data + pointer + (hdr->tcp->doff*4);
+            } else if(hdr->ip->protocol == ip_::proto::IGMP) {
+                hdr->igmp = (struct igmphdr *)(data + pointer);
+            } else {
+                return false;
+            }
+            return true;
         }
-        return true;
-    }
 
-    REGISTER_COMPONENT(Simple_component_factory<homework_routing>,
-            homework_routing);
-} // vigil namespace
+        REGISTER_COMPONENT(Simple_component_factory<homework_routing>,
+                           homework_routing);
+    } // vigil namespace
