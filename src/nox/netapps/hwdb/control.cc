@@ -283,10 +283,10 @@ void HWDBControl::restart(void) {
                 /* First column is the timestamp. */
                 last = string_to_timestamp(column[0]);
                 Lease *lease = new Lease(last,
-                        column[1], /* st */
-                        column[2], /* mc */
-                        column[3], /* ip */
-                        column[4]  /* hn */
+                        column[4], /* st */
+                        column[1], /* mc */
+                        column[2], /* ip */
+                        column[3]  /* hn */
                         );
                 lg.info("Lease is %s\n", lease->string().c_str());
                 delete lease;
@@ -371,10 +371,10 @@ map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
                     //ret[ethernetaddr(string(column[2]))] = ipaddr(string(column[3]));
                     lg.info("Lease is %s -> %s\n", column[2], column[3]);
                     ret[ethernetaddr(string(column[2]))] = Lease(last,
-                            column[1], // st
-                            column[2], // mc
-                            column[3], // ip
-                            column[4]  // hn
+                            column[4], // st
+                            column[1], // mc
+                            column[2], // ip
+                            column[3]  // hn
                             );
 
                 }

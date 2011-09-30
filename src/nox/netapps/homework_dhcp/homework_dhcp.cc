@@ -163,14 +163,14 @@ namespace vigil
         unsigned int bytes = 0;
         memset(q, 0, SOCK_RECV_BUF_LEN);
         bytes += sprintf(q + bytes, "SQL:insert into Leases values (" );
-        /* action */
-        bytes += sprintf(q + bytes, "\"%s\", ", action);
         /* mac address */
         bytes += sprintf(q + bytes, "\"%s\", ", mac);
         /* ip address */
         bytes += sprintf(q + bytes, "\"%s\", ", ip);
         /* hostname (optional) */
-        bytes += sprintf(q + bytes, "\"%s\")\n",hostname);
+        bytes += sprintf(q + bytes, "\"%s\", ", hostname);
+        /* action */
+        bytes += sprintf(q + bytes, "\"%s\") on duplicate key update\n", action);
 
         this->hwdb->insert(q);
     }
@@ -210,7 +210,7 @@ namespace vigil
         flow.tp_src = htons(68);
         flow.tp_dst = htons(67);  
         this->send_flow_modification (flow, wildcard, pi.datapath_id,
-                -1, OFPFC_ADD, OFP_FLOW_PERMANENT, act);
+                -1, OFPFC_ADD, OFP_FLOW_PERMANENT, OFP_DEFAULT_PRIORITY+1, act);
 
         return CONTINUE;
     }
@@ -706,7 +706,7 @@ namespace vigil
 
     bool
         homework_dhcp::send_flow_modification (Flow flow, uint32_t wildcard,  datapathid datapath_id,
-                uint32_t buffer_id, uint16_t command, uint16_t timeout,
+                uint32_t buffer_id, uint16_t command, uint16_t timeout, uint16_t prio,
                 std::vector<boost::shared_array<char> > act) {
 
             std::vector< boost::shared_array<char> >::iterator iter;
@@ -741,7 +741,7 @@ namespace vigil
             ofm->buffer_id = htonl(buffer_id);
             ofm->idle_timeout = htons(timeout);
             ofm->hard_timeout = htons(OFP_FLOW_PERMANENT);
-            ofm->priority = htons(OFP_DEFAULT_PRIORITY);
+            ofm->priority = htons(prio); //htons(OFP_DEFAULT_PRIORITY);
             ofm->flags = htons( OFPFF_SEND_FLOW_REM); // | OFPFF_CHECK_OVERLAP);
 
             char *data = (char *)ofm->actions;

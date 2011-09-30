@@ -16,24 +16,13 @@
 ## <http://www.gnu.org/licenses/>.
 
 import sys, traceback
-import pprint, time, re
-ppf = pprint.pprint
-import simplejson as json
+import time, re
 
-from threading import Thread
-
-from nox.netapps.homework_routing.pydhcp import pydhcp_app
 from nox.netapps.hwdb.pyhwdb import pyhwdb
 
-from nox.lib import core, openflow, packet, util
-from nox.lib.packet import ethernet, ipv4
-
-import os
+from nox.lib import core, util
 
 Homework = None
-
-EMPTY_JSON = "{}"
-TICKER = 1
 
 
 ##
@@ -45,47 +34,45 @@ def is_valid_ip(ip):
     quads = ip.split(".")
     if len(quads) != 4: return False
 
-    try: return reduce(lambda acc,quad: (0 <= quad <= 255) and acc, map(int, quads), True)
+    try: return reduce(lambda acc, quad: (0 <= quad <= 255) and acc, map(int, quads), True)
     except ValueError: return False
 
 def is_valid_eth(eth):
     """ Test if string is valid representation of Ethernet address. """
-    if ":" in eth: bytes = eth.split(":")
-    elif "-" in eth: bytes = eth.split("-")
-    else: return False ## else: bytes = [ eth[i:i+2] for i in range(0,len(eth),2) ]
+    if not eth: return False
+    bytes = eth.split(":")
 
-    if len(bytes) != 6: return False    
+    if len(bytes) != 6: return False
 
-    try: return reduce(lambda acc,byte: (0 <= byte <= 256) and acc,
-                       map(lambda b: int(b,16), bytes), True)
+    try: return reduce(lambda acc, byte: (0 <= byte <= 256) and acc,
+                       map(lambda b: int(b, 16), bytes), True)
     except ValueError: return False
 
+def formatMacAddress(mac):
+    if "-" in mac:
+        return mac.replace("-", ":")
+    if ":" in mac:
+        return mac
 
-##
-## openflow event handlers
-##
-    
-def datapath_join(dpid, attrs):
-    """ Event handler for controller detection of live datapath (port). """
-    Homework.st['ports'][dpid] = attrs['ports'][:]
+    return mac[0:2] + ":" + mac[2:4] + ":" + mac[4:6] + ":" + mac[6:8] + ":" + mac[8:10] + ":" + mac[10:12]
 
-def datapath_leave(dpid):
-    """ Event handler for controller detection of datapath going down. """
-    del Homework.st['ports'][dpid]
-
-##
-## webservice entry points
-##
-def parseMacAddress(str):
+def getMacAddress(str):
     if str.startswith('ETH|'):
         parts = str.split('|')
-        mac = parts[1]
-        if ":" not in mac:
-            return mac[0:2] + ":" + mac[2:4] + ":" + mac[4:6] + ":" + mac[6:8] + ":" + mac[8:10] + ":" + mac[10:12]
-        return mac
+        return formatMacAddress(parts[1])
 
     elif str.startswith('IP|'):
         parts = str.split('|')
+        ip = parts[1]
+        if not is_valid_ip(ip):
+            return None
+        result = Homework._hwdb.call("SQL:SELECT * from Leases WHERE ipaddr = \"{}\"".format(ip))
+        leases = parseResult(result)
+        if len(leases) == 0:
+            return None
+        return leases[len(leases) - 1]['macaddr']
+    else:
+        return str
 
 def parseResult(str):
     result = []
@@ -104,28 +91,18 @@ def parseResult(str):
             continue
         columnInfo = header.split(":")
         headers.append(columnInfo[1])
-    
+
     for line in lines:
         if len(line) == 0:
-            continue  
+            continue
         parameters = line.split("<|>")
         resultItem = dict()
         for i in range(len(headers)):
             resultItem[headers[i]] = parameters[i]
-            
+
         result.append(resultItem)
-            
+
     return result
-
-def status(eaddr=None):
-    """ Permit/Deny status of specified/all addresses. """
-
-    if not eaddr:
-        permitted = { "permitted": list(map(str, Homework.st['permitted'].keys())), }
-    else:
-        eaddr = util.convert_to_eaddr(eaddr)
-        result = "permitted" if eaddr in permitted else "denied"
-    return json.dumps(permitted)
 
 def timer():
     try:
@@ -137,24 +114,28 @@ def timer():
         commands = parseResult(result);
         for command in commands:
             # Execute command
-            devices = []
-            device = { 'mac': parseMacAddress(command['arguments']), 'action': command['command'] }
-            devices.append(device)
 
-            Homework._hwdb.postEvent(devices)
+            mac = getMacAddress(command['arguments'])
             Homework.last = command['timestamp']
+            if is_valid_eth(mac):
+                device = { 'mac': mac, 'action': command['command'] }
+                devices = [ device ]
 
-            # Insert result
-            result = Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '1', \"Success\")".format(command['commandid']))
-            print result
-            result = Homework._hwdb.call("SQL:INSERT into NoxStatus values (\"{}\", \"{}\", \"{}\")".format(command['arguments'], command['command'], command['source']))
-            print result
+                Homework._hwdb.postEvent(devices)
+
+                # Insert result
+                Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '1', \"Success\")".format(command['commandid']))
+                Homework._hwdb.call("SQL:INSERT into NoxStatus values (\"{}\", \"{}\", \"{}\") on duplicate key update".format(mac, command['command'], command['source']))
+            elif not mac:
+                Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '0', \"Could not find MAC Address for {}\")".format(command['commandid'], command['arguments']))
+            else:
+                Homework._hwdb.call("SQL:INSERT into NoxResponse values (\"{}\", '0', \"{} not recognized as a MAC Address\")".format(command['commandid'], mac))
 
     except:
-        traceback.print_exc(file=sys.stdout)
-    
-    Homework.post_callback(1, timer)        
-    
+        traceback.print_exc(file = sys.stdout)
+
+    Homework.post_callback(1, timer)
+
 
 def setup():
     try:
@@ -163,56 +144,38 @@ def setup():
         statuses = parseResult(result)
         devices = []
         for status in statuses:
-            device = { 'mac': parseMacAddress(status['arguments']), 'action': status['state'] }
+            device = { 'mac': getMacAddress(status['device']), 'action': status['state'] }
             devices.append(device)
             Homework.last = status['timestamp']
-                
-            if len(devices) > 0:
-                print "Posting changes:", devices
-                Homework._hwdb.postEvent(devices)
+
+        if len(devices) > 0:
+            print "Posting changes:", devices
+            Homework._hwdb.postEvent(devices)
     except:
-        traceback.print_exc(file=sys.stdout)
-        
+        traceback.print_exc(file = sys.stdout)
+
 ##
 ## main
 ##
 
 class homework(core.Component):
     """ Main application. """
-    
+
     def __init__(self, ctxt):
         core.Component.__init__(self, ctxt)
         global Homework
         Homework = self
-        Homework.last = None        
-        Homework.st = { 'permitted': {}, ## eaddr -> None ## [ipaddr, ...]
-                        'ports': {},     ## dpid -> attrs
-                        }
-        if os.path.exists("/etc/homework/whitelist.conf") : 
-            permit_list = open("/etc/homework/whitelist.conf", "r")
+        Homework.last = None
 
-            for eaddr in permit_list:
-                eaddr = eaddr.strip()
-                print "PERMIT", eaddr
-                eaddr = util.convert_to_eaddr(eaddr)
-                self.st['permitted'][eaddr] = None
-    
     def install(self):
-        Homework.register_for_datapath_join(datapath_join)
-        Homework.register_for_datapath_leave(datapath_leave)
-
-        self._dhcp = self.resolve(pydhcp_app)
-        print self._dhcp.get_dhcp_mapping()
-        self._dhcp.register_object(self)
-        
         # gettting a reference for the hwdb component
         self._hwdb = self.resolve(pyhwdb)
         # print "hwdb obj " + str(self._hwdb)
 
         setup()
-        
+
         self.post_callback(1, timer)
-        
+
     def getInterface(self): return str(homework)
 
 def getFactory():

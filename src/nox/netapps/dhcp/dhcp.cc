@@ -123,13 +123,13 @@ void dhcp::insert_hwdb(const char *action, const char *ip,
 	memset(q, 0, SOCK_RECV_BUF_LEN);
 	bytes += sprintf(q + bytes, "SQL:insert into Leases values (" );
 	/* action */
-	bytes += sprintf(q + bytes, "\"%s\", ", action);
-	/* mac address */
 	bytes += sprintf(q + bytes, "\"%s\", ", mac);
-	/* ip address */
+	/* mac address */
 	bytes += sprintf(q + bytes, "\"%s\", ", ip);
+	/* ip address */
+	bytes += sprintf(q + bytes, "\"%s\", ", hostname);
 	/* hostname (optional) */
-	bytes += sprintf(q + bytes, "\"%s\")\n",hostname);
+	bytes += sprintf(q + bytes, "\"%s\")\n",action);
 	
 	fprintf(stderr, "%s", q);
 	if (! rpc_call(rpc, q, bytes, r, sizeof(r), &rlen)) {
