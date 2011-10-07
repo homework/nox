@@ -211,7 +211,7 @@ namespace vigil
     Disposition homework_routing::mac_pkt_handler(const Event& e) {
         //printf("ethernet packet handled\n");
         std::vector<boost::shared_array<char> > act;
-        struct ofp_action_output *ofp_act_out, *ofp_act_out2;
+        struct ofp_action_output *ofp_act_out; // , *ofp_act_out2;
         const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
         Flow flow(pi.in_port, *(pi.get_buffer()));
         //printf("pkt_in packet: %s\n", flow.to_string().c_str()); 
@@ -428,7 +428,7 @@ namespace vigil
             const Packet_in_event& pi = assert_cast<const Packet_in_event&>(e);
             Flow flow(pi.in_port, *(pi.get_buffer()));
             ethernetaddr dl_dst;
-            dhcp_mapping *src_state = NULL; //, *dst_state = NULL;
+            // dhcp_mapping *src_state = NULL; //, *dst_state = NULL;
             bool is_src_router = (flow.in_port == OFPP_LOCAL);
             //bool is_dst_router = (flow.dl_dst == this->bridge_mac);
             bool is_dst_local = 0;
@@ -625,7 +625,7 @@ namespace vigil
 
             /* XXX if we've got this far, simply forward packet out of IN_PORT and FLOOD */
 
-            ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
+            boost::shared_array<char> ofp_out = boost::shared_array<char>(new char[sizeof(struct ofp_action_output)]);
             act.push_back(ofp_out);
             ofp_act_out = (ofp_action_output *)ofp_out.get();
             ofp_act_out->type = htons(OFPAT_OUTPUT);

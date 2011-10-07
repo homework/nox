@@ -164,7 +164,7 @@ namespace vigil
           void whitelist_mac(const ethernetaddr& ether);
           bool send_flow_modification (Flow fl, uint32_t wildcard, datapathid datapath_id,
                   uint32_t buffer_id, uint16_t command,
-                  uint16_t idle_timeout, 
+                  uint16_t idle_timeout, uint16_t prio,
                   std::vector<boost::shared_array<char> > act);
           std::vector<std::string> get_dhcp_mapping();
            bool check_access(const ethernetaddr& ether);

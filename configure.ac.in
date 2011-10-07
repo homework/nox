@@ -68,7 +68,7 @@ if test "$ax_cv_boost_filesystem" != "yes"; then
                 [storage user_event_log tests discovery 
                  bindings_storage switchstats flow_fetcher data
                  networkstate hoststate tablog lavi monitoring
-                 dhcp insertion_delay_test homework_dhcp homework_routing hwdb 
+                 insertion_delay_test homework_dhcp homework_routing hwdb # dhcp
 		#add netapps component here authenticator route routing topology switch_managementw
                  ],
                  [TURN_ON_NETAPPS])

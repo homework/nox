@@ -137,7 +137,9 @@ int HWDBControl::insert(char *question) {
     char msg[RTAB_MSG_MAX_LENGTH];
 
     length = query(question, response, sizeof(response));
-
+    if (length == 0) {
+        return 1;
+    }
     e = rtab_status(response, msg);
     lg.info("%s\n", msg);
     fprintf(stderr, "insert: %s %s \n", question, response);
@@ -147,7 +149,7 @@ int HWDBControl::insert(char *question) {
 unsigned int HWDBControl::query (char *q, char *r, int l) {
 
     char response[SOCK_RECV_BUF_LEN];
-    unsigned int length;
+    unsigned int length = 0;
 
     lg.info("[%d] %s", strlen(q), q);
 
@@ -283,10 +285,10 @@ void HWDBControl::restart(void) {
                 /* First column is the timestamp. */
                 last = string_to_timestamp(column[0]);
                 Lease *lease = new Lease(last,
-                        column[4], /* st */
-                        column[1], /* mc */
-                        column[2], /* ip */
-                        column[3]  /* hn */
+                        column[1], /* st */
+                        column[2], /* mc */
+                        column[3], /* ip */
+                        column[4]  /* hn */
                         );
                 lg.info("Lease is %s\n", lease->string().c_str());
                 delete lease;
@@ -302,11 +304,45 @@ void HWDBControl::restart(void) {
     rpc_disconnect(rpc);
 }
 
-    map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
-        map<ethernetaddr, Lease> ret;
-		return ret;
-	}
+map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
 	
+	map<ethernetaddr, Lease> ret;
+	
+	char question[SOCK_RECV_BUF_LEN];
+	char response[SOCK_RECV_BUF_LEN];
+	unsigned int length;
+	
+	Rtab *results;
+	char msg[RTAB_MSG_MAX_LENGTH];
+	
+	tstamp_t ts;
+	
+	int i;
+	
+	sprintf(question, "SQL:select * from Leases\n");
+	length = query(question, response, sizeof(response));
+	
+	results = rtab_unpack(response, length);
+	if (results && ! rtab_status(response, msg)) {
+		
+		rtab_print(results);
+		for (i = 0; i < results->nrows; i++) {
+			char **column = rtab_getrow(results, i);
+			/* First column is the timestamp. */
+               		ts = string_to_timestamp(column[0]);
+			lg.info("Lease is %s -> %s\n", column[1], column[2]);
+			ret[ethernetaddr(string(column[1]))] = Lease(
+			ts,
+			column[4], // st
+			column[1], // mc
+			column[2], // ip
+			column[3]  // hn
+			);
+		}
+	}
+	return ret;
+}
+
 /*
 map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
 	
@@ -371,10 +407,10 @@ map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
                     //ret[ethernetaddr(string(column[2]))] = ipaddr(string(column[3]));
                     lg.info("Lease is %s -> %s\n", column[2], column[3]);
                     ret[ethernetaddr(string(column[2]))] = Lease(last,
-                            column[4], // st
-                            column[1], // mc
-                            column[2], // ip
-                            column[3]  // hn
+                            column[1], // st
+                            column[2], // mc
+                            column[3], // ip
+                            column[4]  // hn
                             );
 
                 }

@@ -53,7 +53,7 @@ namespace vigil
         int s;
         struct ifreq ifr;
         struct nl_cache *cache;
-        int i = 1;
+        // int i = 1;
         timeval now;
         dhcp_mapping *state = NULL;
 

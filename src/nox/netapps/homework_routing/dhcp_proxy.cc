@@ -60,8 +60,12 @@ namespace vigil {
     bool
         dhcp_proxy::is_ether_addr_routable(ethernetaddr ether) {
             bool ret = false;
-            PyObject *py_ret = PyObject_CallMethod(this->p_hw, "permit_ether_addr", "(s)", 
-                    ether.string().c_str());
+			const char *s1 = "permit_ether_addr";
+			const char *s2 = "(s)";
+            PyObject *py_ret = PyObject_CallMethod(this->p_hw, 
+				const_cast<char *>(s1), 
+				const_cast<char *>(s2), 
+				ether.string().c_str());
             if(py_ret != NULL) {
                 ret = PyInt_AsLong(py_ret);
                 // printf("permit_ether_addr %s returned: %d %s\n", ether.string().c_str(),PyInt_AsLong(py_ret),

@@ -18,13 +18,10 @@
 
 /* HWDB includes */
 extern "C" {
-
-#include "/home/homeuser/hwdb/srpc.h"
-#include "/home/homeuser/hwdb/rtab.h"
-
-#include "/home/homeuser/hwdb/config.h"
-
-#include "/home/homeuser/hwdb/timestamp.h"
+#include <hwdb/srpc.h>
+#include <hwdb/rtab.h>
+#include <hwdb/config.h>
+#include <hwdb/timestamp.h>
 }
 
 #include "threads/cooperative.hh"
