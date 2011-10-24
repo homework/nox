@@ -137,9 +137,7 @@ int HWDBControl::insert(char *question) {
     char msg[RTAB_MSG_MAX_LENGTH];
 
     length = query(question, response, sizeof(response));
-    if (length == 0) {
-        return 1;
-    }
+
     e = rtab_status(response, msg);
     lg.info("%s\n", msg);
     fprintf(stderr, "insert: %s %s \n", question, response);
@@ -147,14 +145,24 @@ int HWDBControl::insert(char *question) {
 }
 
 unsigned int HWDBControl::query (char *q, char *r, int l) {
+    
+    Q_Decl(question, SOCK_RECV_BUF_LEN);
 
     char response[SOCK_RECV_BUF_LEN];
-    unsigned int length = 0;
+    unsigned int length;
 
-    lg.info("[%d] %s", strlen(q), q);
+    if (strlen(q) + 1 > SOCK_RECV_BUF_LEN) {
+        lg.err("hwdb error: invalid query length\n");
+        return 0;
+    }
 
-    if (! rpc_call(rpc, q, strlen(q) + 1, 
-                response, SOCK_RECV_BUF_LEN, &length)) {
+    memset(question, 0, SOCK_RECV_BUF_LEN);
+    memcpy(question, q, strlen(q) + 1);
+
+    lg.info("[%d] %s", strlen(question), question);
+
+    if (! rpc_call(rpc, Q_Arg(question), strlen(question) + 1,
+        response, SOCK_RECV_BUF_LEN, &length)) {
 
         lg.err("hwdb error: rpc_call() failed\n");
         return 0;
@@ -285,10 +293,10 @@ void HWDBControl::restart(void) {
                 /* First column is the timestamp. */
                 last = string_to_timestamp(column[0]);
                 Lease *lease = new Lease(last,
-                        column[1], /* st */
-                        column[2], /* mc */
-                        column[3], /* ip */
-                        column[4]  /* hn */
+                        column[4], /* st */
+                        column[1], /* mc */
+                        column[2], /* ip */
+                        column[3]  /* hn */
                         );
                 lg.info("Lease is %s\n", lease->string().c_str());
                 delete lease;
@@ -304,45 +312,11 @@ void HWDBControl::restart(void) {
     rpc_disconnect(rpc);
 }
 
-map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
-	
-	map<ethernetaddr, Lease> ret;
-	
-	char question[SOCK_RECV_BUF_LEN];
-	char response[SOCK_RECV_BUF_LEN];
-	unsigned int length;
-	
-	Rtab *results;
-	char msg[RTAB_MSG_MAX_LENGTH];
-	
-	tstamp_t ts;
-	
-	int i;
-	
-	sprintf(question, "SQL:select * from Leases\n");
-	length = query(question, response, sizeof(response));
-	
-	results = rtab_unpack(response, length);
-	if (results && ! rtab_status(response, msg)) {
-		
-		rtab_print(results);
-		for (i = 0; i < results->nrows; i++) {
-			char **column = rtab_getrow(results, i);
-			/* First column is the timestamp. */
-               		ts = string_to_timestamp(column[0]);
-			lg.info("Lease is %s -> %s\n", column[1], column[2]);
-			ret[ethernetaddr(string(column[1]))] = Lease(
-			ts,
-			column[4], // st
-			column[1], // mc
-			column[2], // ip
-			column[3]  // hn
-			);
-		}
+    map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
+        map<ethernetaddr, Lease> ret;
+		return ret;
 	}
-	return ret;
-}
-
+	
 /*
 map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
 	
@@ -354,7 +328,7 @@ map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
 	
 	map<ethernetaddr, Lease> ret;
 
-	char question[SOCK_RECV_BUF_LEN];
+	Q_Decl(question, SOCK_RECV_BUF_LEN);
 	
 	char response[SOCK_RECV_BUF_LEN];
 	
@@ -389,7 +363,7 @@ map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
             }
             lg.info("[%d] %s", strlen(question), question);
 
-            if (! rpc_call(rpc, question, strlen(question) + 1, 
+            if (! rpc_call(rpc, Q_Arg(question), strlen(question) + 1, 
                         response, SOCK_RECV_BUF_LEN, &length)) {
                 lg.err("hwdb error: rpc_call() failed\n");
                 return ret;
@@ -407,10 +381,10 @@ map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
                     //ret[ethernetaddr(string(column[2]))] = ipaddr(string(column[3]));
                     lg.info("Lease is %s -> %s\n", column[2], column[3]);
                     ret[ethernetaddr(string(column[2]))] = Lease(last,
-                            column[1], // st
-                            column[2], // mc
-                            column[3], // ip
-                            column[4]  // hn
+                            column[4], // st
+                            column[1], // mc
+                            column[2], // ip
+                            column[3]  // hn
                             );
 
                 }
@@ -445,7 +419,8 @@ void HWDBControl::offer(void) {
     char myhost[128];
     unsigned short myport;
 
-    char q[SOCK_RECV_BUF_LEN], r[SOCK_RECV_BUF_LEN];
+    Q_Decl(q, SOCK_RECV_BUF_LEN); 
+    char r[SOCK_RECV_BUF_LEN];
 
     unsigned int length;
 
@@ -465,7 +440,7 @@ void HWDBControl::offer(void) {
 
     lg.info("Q: %s\n", q);
 
-    if (! rpc_call(rpc, q, strlen(q) + 1, r, sizeof(r), &length)) {
+    if (! rpc_call(rpc, Q_Arg(q), strlen(q) + 1, r, sizeof(r), &length)) {
 
         lg.err("hwdb error: rpc_call failed (%s)\n", q);
         exit(-1);
