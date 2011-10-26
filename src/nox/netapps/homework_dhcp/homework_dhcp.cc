@@ -56,7 +56,7 @@ namespace vigil
         // int i = 1;
         timeval now;
         dhcp_mapping *state = NULL;
-
+	
         //initialiaze and connect the socket to the netlink socket
         if((this->sk = nl_socket_alloc()) == NULL) {
             lg.err("socket alloc");

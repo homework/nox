@@ -11,6 +11,10 @@
 
 #include "lease.hh"
 
+extern "C" {
+#include <hwdb/srpc.h>
+}
+
 
 #define DEVICE_QUERY_DELAY 1
 
@@ -50,6 +54,8 @@ namespace vigil {
     }
 
     void HWDBControl::install () {
+	
+	lg.info("Installing hwdb.\n");
 
         if (! rpc_init(0)) {
 
@@ -137,7 +143,9 @@ int HWDBControl::insert(char *question) {
     char msg[RTAB_MSG_MAX_LENGTH];
 
     length = query(question, response, sizeof(response));
-
+	if (length == 0) {
+		return 1;
+	}
     e = rtab_status(response, msg);
     lg.info("%s\n", msg);
     fprintf(stderr, "insert: %s %s \n", question, response);
@@ -150,7 +158,7 @@ unsigned int HWDBControl::query (char *q, char *r, int l) {
 
     char response[SOCK_RECV_BUF_LEN];
     unsigned int length;
-
+    
     if (strlen(q) + 1 > SOCK_RECV_BUF_LEN) {
         lg.err("hwdb error: invalid query length\n");
         return 0;
@@ -170,6 +178,8 @@ unsigned int HWDBControl::query (char *q, char *r, int l) {
     response[length] = '\0';
     memcpy(r, response, length);
     return length;
+    
+    return 0;
 }
 
 void HWDBControl::timer (void) {
@@ -312,10 +322,49 @@ void HWDBControl::restart(void) {
     rpc_disconnect(rpc);
 }
 
-    map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
-        map<ethernetaddr, Lease> ret;
+map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
+	
+	map<ethernetaddr, Lease> ret;
+	
+	const char *question = "SQL: select * from Leases";
+	
+	char response[SOCK_RECV_BUF_LEN];
+	unsigned int length;
+	
+	Rtab *results;
+	char msg[RTAB_MSG_MAX_LENGTH];
+	
+	tstamp_t ts;
+	
+	int i;
+	
+	length = query(const_cast<char *>(question), response, sizeof(response));
+	
+	if (length == 0) {
+		lg.info("Failed to fetch table Leases.\n");
 		return ret;
 	}
+	
+	results = rtab_unpack(response, length);
+	if (results && ! rtab_status(response, msg)) {
+		
+		rtab_print(results);
+		for (i = 0; i < results->nrows; i++) {
+			char **column = rtab_getrow(results, i);
+			/* First column is the timestamp. */
+               		ts = string_to_timestamp(column[0]);
+			lg.info("Lease is %s -> %s\n", column[1], column[2]);
+			ret[ethernetaddr(string(column[1]))] = Lease(
+			ts,
+			column[4], // st
+			column[1], // mc
+			column[2], // ip
+			column[3]  // hn
+			);
+		}
+	}
+	return ret;
+}
 	
 /*
 map<ethernetaddr, Lease> HWDBControl::get_dhcp_persist() {
