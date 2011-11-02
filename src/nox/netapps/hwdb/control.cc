@@ -545,7 +545,7 @@ int HWDBControl::next (char *mc, char *st, int size) {
 
     char msg[RTAB_MSG_MAX_LENGTH];
 
-    RpcConnection sender;
+    RpcEndpoint sender;
     Rtab *results;
 
 
@@ -574,7 +574,7 @@ int HWDBControl::next (char *mc, char *st, int size) {
 
     /* Reply to sender. */
     sprintf(r, "OK");
-    rpc_response(rps, sender, r, strlen(r) + 1);
+    rpc_response(rps, &sender, r, strlen(r) + 1);
 
     /* Parse event. */
     e[l] = '\0';
